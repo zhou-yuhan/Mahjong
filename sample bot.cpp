@@ -82,18 +82,31 @@ int main()
                 sin >> stmp >> stmp;
                 hand.erase(find(hand.begin(), hand.end(), stmp));
             }
+            /**
+             * 可以在此处理其他编号输入
+             * 储存其他玩家打过的牌、杠、碰、吃的牌
+            */
         }
+        /**
+        * 样例只处理输入编号为2（摸牌）情况并随机出牌
+        * 此处可以在else处修改，根据本轮输入决定是否吃、碰、杠
+        */
         sin.clear();
         sin.str(request[turnID]); // 本回合输入信息
         sin >> itmp;
         if(itmp == 2) { // 摸牌(已经加入手牌)
-            // 随机打出一张牌
             random_shuffle(hand.begin(), hand.end());
             sout << "PLAY " << *hand.rbegin();
             hand.pop_back();
         } else {
-            sout << "PASS"; // 除了打牌什么也不做
+            sout << "PASS"; // 样例除了打牌什么也不做
         }
+        /**
+         * else if(...){
+         * 算法ai...
+         * ...
+         * }
+        */
         response.push_back(sout.str());
     }
 
