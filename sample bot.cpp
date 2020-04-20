@@ -10,10 +10,8 @@
 #else
 #include <json/json.h>
 #endif
-
 #define SIMPLEIO 0
 //由玩家自己定义，0表示JSON交互，1表示简单交互。
-
 */
 
 using namespace std;
@@ -70,7 +68,7 @@ int main()
             sin >> stmp;
             hand.push_back(stmp);
         }
-        for(int i = 2; i < turnID; i++) { // 一二之后每回合的输入输出(包括本回合)
+        for(int i = 2; i < turnID; i++) { // 一二之后每回合的输入输出(不包括本回合)
             sin.clear();
             sin.str(request[i]);
             sin >> itmp; // 输入指令编号
@@ -94,7 +92,15 @@ int main()
         sin.clear();
         sin.str(request[turnID]); // 本回合输入信息
         sin >> itmp;
-        if(itmp == 2) { // 摸牌(已经加入手牌)
+        if(itmp == 2) { // 摸牌
+            sin >> stmp;
+            hand.push_back(stmp);
+            /**
+             * 此处添加将本回合摸的牌加入手牌， 经过botzone测试，可以正常使用
+             * 注：原样例没有此步骤也是可以正常运行的，因为本回合摸的牌会在下一回合request序列里加入手牌
+             * 只不过本回合的出牌、杠、胡等操作不会在手牌里考虑这张牌
+             * 
+            */
             random_shuffle(hand.begin(), hand.end());
             sout << "PLAY " << *hand.rbegin();
             hand.pop_back();
