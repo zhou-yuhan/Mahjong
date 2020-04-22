@@ -165,7 +165,7 @@ pair<string, int> Out(int k)
     ssin.str(request[k]);
     ssin >> InfoNum;
     ssin >> playerID;
-    if(command >= 3){
+    if(InfoNum >= 3){
         ssin >> command;
         switch(command){
             case "PLAY": 
