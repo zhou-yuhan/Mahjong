@@ -2,7 +2,7 @@
  * @Author: Xia Hanyu
  * @Date:   2020-04-22 16:40:15
  * @Last Modified by:   Xia Hanyu
- * @Last Modified time: 2020-04-22 22:24:34
+ * @Last Modified time: 2020-04-22 22:52:22
  */
 
 /**20200422 Xia_Hanyu Update
@@ -96,7 +96,7 @@ void AddKnown(string card)
  * CalPos 计算玩家ID相对于自己是上家、对家、下家
 */
 vector<pair<string, pair<string, int> > > pack;
-void AddPack(string TYPE, string MidCard, int from, bool is_BUGANG = false, string CHIcard = "NONE") // is_BUGANG 用于区分暗杠和补杠 CHIcard是吃的那张牌
+void AddPack(string TYPE, string MidCard, int from, bool is_BUGANG = false) // is_BUGANG 用于区分暗杠和补杠
 {
     pack.push_back(make_pair(TYPE, make_pair(MidCard, from)));
     // 将自己鸣牌加入known
@@ -106,8 +106,9 @@ void AddPack(string TYPE, string MidCard, int from, bool is_BUGANG = false, stri
                 AddKnown(MidCard);
             break;
         case "CHI":
-            for(int i = -1; i <= 1; ++i){ // 不添加吃的牌，因为已经添加了
-                if(sti[MidCard] + i != sti[CHIcard])
+            int CHIcard_code = from - 2; // 1 2 3 --> -1 0 1
+            for(int i = -1; i <= 1; ++i){
+                if(i != CHIcard_code)
                     AddKnown(its[sti[MidCard] + i]);
             }
             break;
@@ -138,6 +139,11 @@ inline int CalPos(int x)
         case opposite: return 2;
         case next: return 3;
     }
+}
+
+inline int CalSupply(string MidCard, string SupplyCard)
+{
+    return 2 - (sti[MidCard] - sti[SupplyCard]);
 }
 
 inline int lastID() 
@@ -251,7 +257,7 @@ void ProcessKnown()
             AddPack("GANG", CardName, 0, true);
         }else if(stmp == "CHI"){
             sin >> CardName; // 得到的顺子的中间
-            AddPack("CHI", CardName, CalPos(Out(i).second), false, Out(i).first);
+            AddPack("CHI", CardName, CalSupply(CardName, Out(i).first));
             sin >> CardName; // 打出牌
             AddKnown(CardName);
         }
