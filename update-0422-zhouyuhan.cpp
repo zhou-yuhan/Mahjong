@@ -1,8 +1,8 @@
 /*
  * @Author: Xia Hanyu
  * @Date:   2020-04-22 16:40:15
- * @Last Modified by:   Xia Hanyu
- * @Last Modified time: 2020-04-22 22:52:22
+ * @Last Modified by:   Wen Tianyu
+ * @Last Modified time: 2020-04-22 23:13:15
  */
 
 /**20200422 Xia_Hanyu Update
@@ -200,6 +200,8 @@ void ProcessKnown()
         sin >> itmp;
         if (itmp == 3) {
             sin >> idtmp;
+            if (idtmp == myPlayerID)
+                continue;
             sin >> stmp;
             if (stmp == "PLAY") {
                 sin >> CardName;
