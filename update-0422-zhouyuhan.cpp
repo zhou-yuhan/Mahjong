@@ -2,7 +2,7 @@
  * @Author: Xia Hanyu
  * @Date:   2020-04-22 16:40:15
  * @Last Modified by:   Xia Hanyu
- * @Last Modified time: 2020-04-22 21:07:46
+ * @Last Modified time: 2020-04-22 22:24:34
  */
 
 /**20200422 Xia_Hanyu Update
@@ -96,24 +96,32 @@ void AddKnown(string card)
  * CalPos 计算玩家ID相对于自己是上家、对家、下家
 */
 vector<pair<string, pair<string, int> > > pack;
-void AddPack(string TYPE, string MidCard, int from, bool is_BUGANG = false) // is_BUGANG 用于区分暗杠和补杠
+void AddPack(string TYPE, string MidCard, int from, bool is_BUGANG = false, string CHIcard = "NONE") // is_BUGANG 用于区分暗杠和补杠 CHIcard是吃的那张牌
 {
     pack.push_back(make_pair(TYPE, make_pair(MidCard, from)));
     // 将自己鸣牌加入known
     switch(TYPE){
         case "PENG": 
-            for(int i = 0; i < 3; ++i)
+            for(int i = 0; i < 2; ++i) // 只需要两次，因为该回合request打出的牌已经添加过一次
                 AddKnown(MidCard);
             break;
         case "CHI":
-            AddKnown(MidCard), AddKnown(its[sti[MidCard] - 1]), AddKnown(its[sti[MidCard] + 1]);
+            for(int i = -1; i <= 1; ++i){ // 不添加吃的牌，因为已经添加了
+                if(sti[MidCard] + i != sti[CHIcard])
+                    AddKnown(its[sti[MidCard] + i]);
+            }
             break;
         case "GANG":
             if(is_BUGANG){
                 AddKnown(MidCard);
             }else{
-                for(int i = 0; i < 4; ++i)
-                    AddKnown(MidCard);
+                if(from == 0){ // 暗杠
+                    for(int i = 0; i < 4; ++i)
+                        AddKnown(MidCard);
+                }else{ // 明杠
+                    for(int i = 0; i < 3; ++i)
+                        AddKnown(MidCard);
+                }
             }
     }
 }
@@ -181,7 +189,7 @@ void ProcessKnown()
     for (int i = 0; i <= turnID; ++i) {
         sin.clear();
         string CardName; 
-        // 1. 所有别人出现的明牌
+        // 1. 所有request出现的明牌
         sin.str(request[i]);
         sin >> itmp;
         if (itmp == 3) {
@@ -197,18 +205,11 @@ void ProcessKnown()
                 AddKnown(Out(i - 1).first);
             }else if(stmp == "CHI") {
                 sin >> CardName;
-                //为了避免把上回合打出的牌重复加入Known中，暂时先分三种情况处理一下...
-                if (Out(i - 1).first == its[sti[CardName] - 1]) { // 1. 吃左牌
-                    AddKnown(CardName);
-                    AddKnown(its[sti[CardName] + 1]);
-                } 
-                else if (Out(i - 1).first == its[sti[CardName] + 1]) { // 2. 吃右牌
-                    AddKnown(its[sti[CardName] - 1]);
-                    AddKnown(CardName);
-                }
-                else if (Out(i - 1).first == CardName) { // 3. 吃中间
-                    AddKnown(its[sti[CardName] - 1]);
-                    AddKnown(its[sti[CardName] + 1]);
+                // 避免把上回合打出的牌重复加入Known
+                string CHIcard = Out(i - 1).first;
+                for(int i = -1; i <= 1; ++i){
+                    if(sti[CardName] + i != sti[CHIcard])
+                        AddKnown(its[sti[CardName] + i]);
                 }
                 sin >> CardName;
                 AddKnown(CardName);
@@ -223,7 +224,7 @@ void ProcessKnown()
                 }
             }
         }
-        // 处理自己打出的牌
+        // 处理response
         if (i == turnID)
             break;
         sin.clear();
@@ -250,7 +251,7 @@ void ProcessKnown()
             AddPack("GANG", CardName, 0, true);
         }else if(stmp == "CHI"){
             sin >> CardName; // 得到的顺子的中间
-            AddPack("CHI", Out(i).first, CalPos(Out(i).second));
+            AddPack("CHI", CardName, CalPos(Out(i).second), false, Out(i).first);
             sin >> CardName; // 打出牌
             AddKnown(CardName);
         }
