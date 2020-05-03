@@ -1,22 +1,17 @@
 /*
  * @Author: Xia Hanyu
  * @Date:   2020-04-22 16:40:15
- * @Last Modified by:   Wen Tianyu
- * @Last Modified time: 2020-04-22 23:13:15
+ * @Last Modified by:   Xia Hanyu
+ * @Last Modified time: 2020-05-03 22:10:30
  */
 
-/**20200422 Xia_Hanyu Update
+/**20200503 Xia_Hanyu Update
  ----------------------------------------
- * 修复LastID() bug
- * 对Out() 进行补充，使得能够返回打牌者ID
- * 增加自己鸣牌库pack并提供相关函数
- * 将PrevioInfo()改为Initial()并只进行初始化，其余工作由ProcessKnown()完成
- * ProcessKnown(), 处理之前所有回合明牌并填充自己的鸣牌库
- * 
+ * 添加了牌墙剩余牌数
+ * 添加了可以胡牌判断函数
  ----------------------------------------
  * 下一步的计划：
- * 胡牌/抢杠胡 
- * 我相信今天写的一定有bug 希望能找到
+ * 处理怎么出牌，什么时候吃牌、碰牌、杠、胡
  */
 
 #include <iostream>
@@ -26,6 +21,7 @@
 #include <algorithm>
 #include <map>
 #include <unordered_map>
+#include "MahjongGB/MahjongGB.h"
 
 using namespace std;
 
@@ -42,6 +38,8 @@ using namespace std;
  * ostringstream istringstream 用于字符串和其他数据类型之间方便转换
  * myPlayerID 应该在吃牌的时候有用
  * quan 不知道有啥用
+ * flowerCount 自己补花数
+ * TileLeft 牌墙剩余牌数
  * lastout 储存上一回合打出了什么牌
  * its --> int to string 
  * sti --> string to int 
@@ -56,6 +54,8 @@ ostringstream sout;
 istringstream sin;
 string lastout;
 int myPlayerID, quan;
+int flowerCount;
+int TileLeft = 92; // 144 - 13 * 4
 string its[34] = { "W1","W2","W3","W4","W5","W6","W7","W8","W9",
                    "B1","B2","B3","B4","B5","B6","B7","B8","B9",
                    "T1","T2","T3","T4","T5","T6","T7","T8","T9",
@@ -100,31 +100,28 @@ void AddPack(string TYPE, string MidCard, int from, bool is_BUGANG = false) // i
 {
     pack.push_back(make_pair(TYPE, make_pair(MidCard, from)));
     // 将自己鸣牌加入known
-    switch(TYPE){
-        case "PENG": 
-            for(int i = 0; i < 2; ++i) // 只需要两次，因为该回合request打出的牌已经添加过一次
-                AddKnown(MidCard);
-            break;
-        case "CHI":
-            int CHIcard_code = from - 2; // 1 2 3 --> -1 0 1
-            for(int i = -1; i <= 1; ++i){
-                if(i != CHIcard_code)
-                    AddKnown(its[sti[MidCard] + i]);
+    if(TYPE == "PENG"){
+        for(int i = 0; i < 2; ++i) // 只需要两次，因为该回合request打出的牌已经添加过一次
+            AddKnown(MidCard);
+    } else if(TYPE == "CHI"){
+        int CHIcard_code = from - 2; // 1 2 3 --> -1 0 1
+        for(int i = -1; i <= 1; ++i){
+            if(i != CHIcard_code)
+                AddKnown(its[sti[MidCard] + i]);
+        }
+    } else if(TYPE == "GANG"){
+        if(is_BUGANG){
+            AddKnown(MidCard);
+        }else{
+            if(from == 0){ // 暗杠
+                for(int i = 0; i < 4; ++i)
+                    AddKnown(MidCard);
+            }else{ // 明杠
+                for(int i = 0; i < 3; ++i)
+                    AddKnown(MidCard);
             }
-            break;
-        case "GANG":
-            if(is_BUGANG){
-                AddKnown(MidCard);
-            }else{
-                if(from == 0){ // 暗杠
-                    for(int i = 0; i < 4; ++i)
-                        AddKnown(MidCard);
-                }else{ // 明杠
-                    for(int i = 0; i < 3; ++i)
-                        AddKnown(MidCard);
-                }
-            }
-    }
+        }
+    }       
 }
 
 inline int CalPos(int x)
@@ -134,10 +131,12 @@ inline int CalPos(int x)
     int previous = myPlayerID > 0 ? myPlayerID - 1 : 3;
     int opposite = (myPlayerID + 2) % 4;
     int next = (myPlayerID + 1) % 4;
-    switch(x){
-        case previous: return 1;
-        case opposite: return 2;
-        case next: return 3;
+    if(x == previous){
+        return 1;
+    }else if(x == opposite){
+        return 2;
+    }else if(x == next){
+        return 3;
     }
 }
 
@@ -173,14 +172,33 @@ pair<string, int> Out(int k)
     ssin >> playerID;
     if(InfoNum >= 3){
         ssin >> command;
-        switch(command){
-            case "PLAY": 
-            case "PENG": ssin >> CardName; break;
-            case "CHI": ssin >> CardName >> CardName; break;
-            default: break; // BUHUA DRAW GANG BUGANG 没有打出牌
+        if(command == "PLAY" || command == "PENG"){
+            ssin >> CardName;
+        }else if(command == "CHI"){
+            ssin >> CardName >> CardName;
         }
     }
     return make_pair(CardName, playerID);
+}
+
+/**
+ * @brief
+ * 以下内容是算法AI部分，可能需要大幅修改
+ * 先添加了HU判断
+ * 
+*/
+bool HU(string winTile, bool isZIMO, bool isGANG)
+{
+    bool isJUEZHANG = (known[winTile] == 3);
+    bool isLast = (TileLeft == 0);
+    vector<pair<int, string> > result = MahjongFanCalculator(
+        pack, hand, winTile, flowerCount, isZIMO, isJUEZHANG, isGANG, isLast, myPlayerID, quan
+    );
+    int FanSum = 0;
+    for(auto i = result.begin(); i != result.end(); ++i){
+        FanSum += i->first;
+    }
+    return FanSum >= 8;
 }
 
 void ProcessKnown()
@@ -203,7 +221,9 @@ void ProcessKnown()
             if (idtmp == myPlayerID)
                 continue;
             sin >> stmp;
-            if (stmp == "PLAY") {
+            if(stmp == "DRAW"){ 
+                TileLeft--;
+            }else if (stmp == "PLAY") {
                 sin >> CardName;
                 AddKnown(CardName);
             }else if(stmp == "PENG") {
@@ -249,7 +269,7 @@ void ProcessKnown()
             // 1. 暗杠
             if(Out(i).first == "NONE"){
                 sin >> CardName;
-                AddPack("GANG", CardName, 0) // 算番库说明没有写暗杠第三个参数应该是什么，先写0吧
+                AddPack("GANG", CardName, 0); // 算番库说明没有写暗杠第三个参数应该是什么，先写0吧
             }else{
                 // 2. 明杠
                 AddPack("GANG", Out(i).first, CalPos(Out(i).second));
@@ -308,7 +328,13 @@ void Initialize()
         sin >> itmp >> myPlayerID >> quan;
         sin.clear();
         sin.str(request[1]); // 第二回合
-        for (int j = 0; j < 5; j++) sin >> itmp; // 编号 四个玩家花牌数
+        sin >> itmp; // 编号
+        for (int j = 0; j < 4; j++) {
+            sin >> itmp; // 四个玩家花牌数
+            TileLeft -= itmp; // 补花减少牌墙牌的数量
+            if(j == myPlayerID)
+                flowerCount = itmp;
+        }
         for (int j = 0; j < 13; j++) { // 手牌
             sin >> stmp;
             hand.push_back(stmp);
@@ -341,8 +367,7 @@ void Act()
     sin.clear();
     if (turnID < 2) {
         sout << "PASS";
-    }
-    else {
+    } else {
         sin.str(request[turnID]); // 本回合输入信息
         sin >> itmp;
         /**
@@ -363,13 +388,13 @@ void Act()
             sin >> idtmp;
             sin >> stmp;
             //下面一行是必定会PASS的情况（补花、摸牌、杠或request来自自己）
-            if (idtmp == myPlayerID || stmp == "BUHUA" || stmp == "DRAW" || stmp == "GANG")
+            if (idtmp == myPlayerID || stmp == "BUHUA" || stmp == "DRAW" || stmp == "GANG"){
                 sout << "PASS";
-            else {
+            } else {
                 if (stmp == "BUGANG") {
                     //判断是否能够抢杠胡、是否抢杠胡
                 }
-                string ThisOut = Out(turnID);
+                pair<string, int> ThisOut = Out(turnID);
                 if (idtmp == lastID()) {
                     //判断是否能吃和是否要吃
                 }
@@ -383,6 +408,7 @@ void Act()
 
 int main()
 {
+    MahjongInit(); // 初始化算番库
     Input();
     Initialize();
     ProcessKnown();
