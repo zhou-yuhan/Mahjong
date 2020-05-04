@@ -132,12 +132,40 @@ int marking(string name) {
     mark += (n01 > 0) * qz[1];//相邻牌的权重
     mark += (n10 > 0) * qz[2];
     mark += (n01 > 0) * qz[2];//隔牌的权重
-    //这个地方对于its数组越界和known中尚未添加对应元素的情况需要做优化
-    int k20 = 4 - known[its[sti[name] - 2]];
-    int k10 = 4 - known[its[sti[name] - 1]];
+     //下面处理未明牌的权重
+    int k20 = 0;
+    if (sti[name] - 2 >= 0) {
+        auto it = known.find(its[sti[name] - 2]);
+        if (it != known.end())
+            k20 = 4 - known[its[sti[name] - 2]];
+        else
+            k20 = 4;
+    } 
+    int k10 = 0;
+    if (sti[name] - 1 >= 0) {
+        auto it = known.find(its[sti[name] - 1]);
+        if (it != known.end())
+            k10 = 4 - known[its[sti[name] - 1]];
+        else
+            k10 = 4;
+    }
     int k00 = 4 - known[name];
-    int k01 = 4 - known[its[sti[name] + 1]];
-    int k02 = 4 - known[its[sti[name] + 2]];
+    int k02 = 0;
+    if (sti[name] + 2 < 27) {
+        auto it = known.find(its[sti[name] + 2]);
+        if (it != known.end())
+            k02 = 4 - known[its[sti[name] + 2]];
+        else
+            k02 = 4;
+    }
+    int k01 = 0;
+    if (sti[name] + 1 < 27) {
+        auto it = known.find(its[sti[name] + 1]);
+        if (it != known.end())
+            k01 = 4 - known[its[sti[name] + 1]];
+        else
+            k01 = 4;
+    }
     if (n20 > 0 && n10 == 0)//(x-2)(x)的情况
         mark += k10 * qz[3];
     if (n10 > 0 && n20 == 0)//(x-1)(x)的情况
