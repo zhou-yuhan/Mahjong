@@ -385,11 +385,11 @@ bool CHI(string card)
     return flag;
 }
 
-bool PENG(string card)
+bool PENG(string card, int from)
 {
     int card_num = NewNum(card);
     if(handset.count(card_num) == 2){
-        AddPack("PENG", card);
+        AddPack("PENG", card, from);
         return true;
     }
     return false;
