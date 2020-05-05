@@ -1,21 +1,18 @@
 /*
  * @Author: Xia Hanyu
- * @Date:   2020-04-22 16:40:15
- * @Last Modified by:   Wen Tianyu
- * @Last Modified time: 2020-05-04 17:38:00
+ * @Date:   2020-05-05 10:55:15
+ * @Last Modified by:   Xia Hanyu
+ * @Last Modified time: 2020-05-05 12:13:48
  */
-
- /**20200504 Wen Tianyu Update
+ /**20200505 Zhou Yuhan Update
   ----------------------------------------
-  * 添加了multiset容器：handset用来排序储存牌面
-  * 添加了newnum()方便handset的初始化（Line 73）
-  * 添加了vectoset()初始化handset（Line 88）
-  * 添加了qz数组用来储存各权重值，并方便调试
-  * 添加了marking()计算每张牌在当前牌面下的权重（未考虑将牌和凑番种）（Line 122）
+  * 修复了AddPack() bug,将pack从手牌里移除
+  * 添加了CHI() PENG() BUGANG() GANG()，可以处理鸣牌
+  * 将权值转为struct params 便于以后调参
   ----------------------------------------
   * 下一步的计划：
+  * 把算法函数加入Act()
   * 优化marking()的参数
-  * 判断是否吃、碰、杠
   */
 
 #include <iostream>
@@ -31,7 +28,6 @@
 using namespace std;
 
 
-
 /**
  * @brief
  * 全局变量，储存基本牌面信息
@@ -40,6 +36,7 @@ using namespace std;
  * itmp --> int_temp
  * request, response  该回合之前所有信息
  * hand 手牌
+ * handset 储存纯数字化的手牌
  * ostringstream istringstream 用于字符串和其他数据类型之间方便转换
  * myPlayerID 应该在吃牌的时候有用
  * quan 不知道有啥用
@@ -69,8 +66,12 @@ string its[34] = { "W1","W2","W3","W4","W5","W6","W7","W8","W9",
 
 map<string, int> sti;
 
-//用11-19表示W1-W9 31-39表示B1-B9 51-59表示T1-T9 F1=65 F2=70 F3=75 F4=80 J1=85 J2=90 J3=95
-int newnum(string name) {
+int NewNum(string name) {
+    /**
+     * @brief
+     * 将牌名转换为数字
+     * 用11-19表示W1-W9 31-39表示B1-B9 51-59表示T1-T9 F1=65 F2=70 F3=75 F4=80 J1=85 J2=90 J3=95
+    */
     char a1 = name[0];
     char a2 = name[1];
     if (a1 == 'W') 
@@ -85,11 +86,11 @@ int newnum(string name) {
 }
 
 //用来把hand里的string转化成handset里的int储存起来方便评估每张牌的权重
-void vectoset() {
-    int s = hand.size();
-    for (int i = 0; i < s; ++i) {
-        string n = hand[i];
-        handset.insert(newnum(n));
+void HandsetInit() {
+    int len = hand.size();
+    for (int i = 0; i < len; ++i) {
+        string card = hand[i];
+        handset.insert(NewNum(card));
     }
 }
 
@@ -115,24 +116,38 @@ void AddKnown(string card)
     }
 }
 
-//预留下来存放各种权重值的数组(0=相同牌，1=相邻牌，2=隔牌，3=未明牌）
-int qz[10];
+/**
+ * @brief
+ * 用于计算牌面权值的参数
+ * @param
+ * params 储存参数
+*/
+struct node
+{
+    int same;
+    int adjacent;
+    int interval;
+    int unknown;
+};
+
+node params;
 
 //给hand里的每张牌评分
-int marking(string name) {
-    int x = newnum(name);
+int Marking(string name) {
+    int x = NewNum(name);
     int mark = 0;
     int n20 = handset.count(x - 2);
     int n10 = handset.count(x - 1);
     int n00 = handset.count(x);
     int n01 = handset.count(x + 1);
     int n02 = handset.count(x + 2);
-    mark += n00 * qz[0];//相同牌的权重
-    mark += (n10 > 0) * qz[1];
-    mark += (n01 > 0) * qz[1];//相邻牌的权重
-    mark += (n10 > 0) * qz[2];
-    mark += (n01 > 0) * qz[2];//隔牌的权重
-     //下面处理未明牌的权重
+    mark += n00 * params.same;//相同牌的权重
+    mark += (n10 > 0) * params.adjacent;
+    mark += (n01 > 0) * params.adjacent;//相邻牌的权重
+    mark += (n10 > 0) * params.interval;
+    mark += (n01 > 0) * params.interval;//隔牌的权重
+    
+    // 处理还没有的牌的权重
     int k20 = 0;
     if (sti[name] - 2 >= 0) {
         auto it = known.find(its[sti[name] - 2]);
@@ -167,15 +182,15 @@ int marking(string name) {
             k01 = 4;
     }
     if (n20 > 0 && n10 == 0)//(x-2)(x)的情况
-        mark += k10 * qz[3];
+        mark += k10 * params.unknown;
     if (n10 > 0 && n20 == 0)//(x-1)(x)的情况
-        mark += k20 * qz[3];
+        mark += (k20 * params.unknown + k01 * params.unknown);
     if (n02 > 0 && n01 == 0)//(x)(x+2)的情况
-        mark += k01 * qz[3];
+        mark += k01 * params.unknown;
     if (n01 > 0 && n02 == 0)//(x)(x+1)的情况
-        mark += k02 * qz[3];
+        mark += (k02 * params.unknown + k10 * params.unknown);
     if (n00 == 2)//(x)(x)的情况
-        mark += k00 * qz[3];
+        mark += k00 * params.unknown;
     return mark;
 }
 
@@ -189,33 +204,63 @@ int marking(string name) {
  * CalPos 计算玩家ID相对于自己是上家、对家、下家
 */
 vector<pair<string, pair<string, int> > > pack;
-void AddPack(string TYPE, string MidCard, int from, bool is_BUGANG = false) // is_BUGANG 用于区分暗杠和补杠
+void AddPack(string TYPE, string MidCard, int from = 0, bool is_BUGANG = false) // is_BUGANG 用于区分暗杠和补杠
 {
     pack.push_back(make_pair(TYPE, make_pair(MidCard, from)));
-    // 将自己鸣牌加入known
+    // 将自己鸣牌加入known, 并把pack从手牌里拿掉
     if (TYPE == "PENG") {
-        for (int i = 0; i < 2; ++i) // 只需要两次，因为该回合request打出的牌已经添加过一次
+        for (int i = 0; i < 2; ++i){ // 只需要两次，因为该回合request打出的牌已经添加过一次
             AddKnown(MidCard);
+            // vector没有find()，很伤心
+            for(auto j = hand.begin(); j != hand.end(); ++j){
+                if(*j == MidCard){
+                    hand.erase(j); break;
+                }
+            }
+        }
     }
     else if (TYPE == "CHI") {
         int CHIcard_code = from - 2; // 1 2 3 --> -1 0 1
         for (int i = -1; i <= 1; ++i) {
-            if (i != CHIcard_code)
+            if (i != CHIcard_code){
                 AddKnown(its[sti[MidCard] + i]);
+                for(auto j = hand.begin(); j != hand.end(); ++j){
+                    if(*j == its[sti[MidCard] + i]){
+                        hand.erase(j); break;
+                    }
+                }
+            }
         }
     }
     else if (TYPE == "GANG") {
         if (is_BUGANG) {
             AddKnown(MidCard);
+            for(auto j = hand.begin(); j != hand.end(); ++j){
+                if(*j == MidCard){
+                    hand.erase(j); break;
+                }
+            }
         }
         else {
             if (from == 0) { // 暗杠
-                for (int i = 0; i < 4; ++i)
+                for (int i = 0; i < 4; ++i){
                     AddKnown(MidCard);
+                    for(auto j = hand.begin(); j != hand.end(); ++j){
+                        if(*j == MidCard){
+                            hand.erase(j); break;
+                        }
+                    }
+                }
             }
             else { // 明杠
-                for (int i = 0; i < 3; ++i)
+                for (int i = 0; i < 3; ++i){
                     AddKnown(MidCard);
+                    for(auto j = hand.begin(); j != hand.end(); ++j){
+                        if(*j == MidCard){
+                            hand.erase(j); break;
+                        }
+                    }
+                }
             }
         }
     }
@@ -284,11 +329,20 @@ pair<string, int> Out(int k)
 /**
  * @brief
  * 以下内容是算法AI部分，可能需要大幅修改
- * 先添加了HU判断
- *
+ * @function
+ * 1. HU()判断是否能胡
+ * 2. CHI()判断是否能吃
+ * 3. PENG()判断是否能碰
+ * 4. BUGANG()判断是否能补杠，因为补杠输出信息不同于明暗杠
+ * 5. Gang()判断能否明/暗杠
+ * @notice
+ * 存在一些问题，还没想好怎么处理
+ * 1. 仅仅通过判断是否有连牌去判断能否吃/碰/杠，可能导致重复操作，比如已经有 T1 T2 T3,会再吃一张T1，打出T1(也可能打出别的牌)
+ * 2. 如果判断能吃/碰/杠就操作了，好像也不太合理
 */
 bool HU(string winTile, bool isZIMO, bool isGANG)
 {
+    MahjongInit(); // 初始化算番库
     bool isJUEZHANG = (known[winTile] == 3);
     bool isLast = (TileLeft == 0);
     vector<pair<int, string> > result = MahjongFanCalculator(
@@ -299,6 +353,67 @@ bool HU(string winTile, bool isZIMO, bool isGANG)
         FanSum += i->first;
     }
     return FanSum >= 8;
+}
+
+bool CHI(string card)
+{
+    int card_num = NewNum(card);
+    bool flag = false;
+    string mid_card;
+    int from;
+    // 1. 吃左牌
+    if(handset.find(card_num + 1) != handset.end() && handset.find(card_num + 2) != handset.end()){
+        flag = true;
+        mid_card = its[sti[card] + 1];
+        from = 1;
+    }
+    // 2. 吃中间
+    if(handset.find(card_num - 1) != handset.end() && handset.find(card_num + 1) != handset.end()){
+        flag = true;
+        mid_card = card;
+        from = 2;
+    }
+    // 3. 吃右牌
+    if(handset.find(card_num - 1) != handset.end() && handset.find(card_num - 2) != handset.end()){
+        flag = true;
+        mid_card = its[sti[card] - 1];
+        from = 3;
+    }
+    if(flag){
+        AddPack("CHI", mid_card, from);
+    }
+    return flag;
+}
+
+bool PENG(string card)
+{
+    int card_num = NewNum(card);
+    if(handset.count(card_num) == 2){
+        AddPack("PENG", card);
+        return true;
+    }
+    return false;
+}
+
+bool BUGANG(string card)
+{   
+    for(auto i = pack.begin(); i != pack.end(); ++i){
+        if(i->first == "PENG" && (*i).second.first == card){
+            AddPack("GANG", card, 0, true);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool GANG(string card, int from)
+{
+    int card_num = NewNum(card);
+    if(handset.count(card_num) == 3){
+        AddPack("GANG", card, from);
+        return true;
+    } 
+    return false;
 }
 
 void ProcessKnown()
@@ -394,6 +509,8 @@ void ProcessKnown()
             AddKnown(CardName);
         }
     }
+    // 此时将手牌变为纯数字形式
+    HandsetInit();
 }
 
 void Input()
@@ -422,7 +539,7 @@ void Initialize()
 {
     /**
      * @brief
-     * 初始化工作，如增减手牌等
+     * 初始化工作
     */
 
     // 初始化map sti
@@ -522,7 +639,6 @@ void Act()
 
 int main()
 {
-    MahjongInit(); // 初始化算番库
     Input();
     Initialize();
     ProcessKnown();
