@@ -6,16 +6,16 @@
  */
  /**20200507 Wen Tianyu Update
   ----------------------------------------
-  * 加入了MarkingAverage()函数计算整副牌面的评估值
+  * 加入了LowNum()函数计算整副牌面的评估值
   * 将所有有关吃的操作完全割裂为吃左牌、吃中牌、吃右牌三个操作，方便比较、选择其中的最优操作
-  * 加入了IfAct()函数，用来返回不同情况（吃碰杠）下对MarkingAverage()函数在操作前后的变化的评估值
+  * 加入了IfAct()函数，用来返回不同情况（吃碰杠）下对LowNum()函数在操作前后的变化的评估值
   * 大幅修改了ActOthers()函数，现在可以比较不同可选操作的优劣性了
   ----------------------------------------
   * 后续优化重点：
   * params的权重参数
   * IfAct()的评估方式（具体表达式和参数）
   * 现在胡牌（包括抢杠胡）没有策略，即能胡就胡，后续可以考虑判断是否要胡（不过这个不是工作重点，毕竟能胡就不错了/facepalm）
-  * 一些小顾虑：现在这个算平均值的策略还不知道可不可行，不过我觉得只要配合好IfAct()中的评估表达式就能实现高质量的评估
+  * 一些小顾虑：现在这个算比例的策略还不知道可不可行，不过我觉得只要配合好IfAct()中的评估表达式就能实现高质量的评估
   */
 
 #include <iostream>
@@ -197,7 +197,7 @@ int Marking(string card) {
     return mark;
 }
 
-//用平均值给整副牌面评分
+//计算每张牌评分的平均值
 double MarkingAverage() {
     HandsetInit();
     int Size = hand.size();
@@ -205,6 +205,16 @@ double MarkingAverage() {
     for (auto i = hand.begin(); i != hand.end(); ++i)
         TotalMark += Marking(*i);
     return (double)TotalMark / Size;
+}
+
+//LowNum()返回低于平均值的牌占整副牌面的比例
+double LowNum() {
+    int n = 0;
+    double Average = MarkingAverage();
+    for (auto i = hand.begin(); i != hand.end(); ++i)
+        if (Marking(*i) < Average)
+            ++n;
+    return (double)n / hand.size();
 }
 
 vector<string>::iterator CalMinTile() {
@@ -363,7 +373,7 @@ pair<string, int> Out(int k)
  * 对于XXX()函数，返回值一律为string，便于形式统一以及与之后函数(AfterDraw, ActOthers)对接
 */
 
-//IfAct()函数根据不同情况下MarkingAverage()的前后差异给出相应的判定标准(需要大幅度优化）
+//IfAct()函数根据不同情况下LowNum()的前后差异给出相应的判定标准(需要大幅度优化）
 double IfAct(double before, double after, string circum) {
     if (circum == "GANG") {
         return after - before;
@@ -373,6 +383,9 @@ double IfAct(double before, double after, string circum) {
     }
     if (circum == "PENG") {
         return after - before;
+    }
+    if (circum == "BUGANG") {
+
     }
 
     //下面这个备选返回值没用
@@ -486,8 +499,7 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
     if (CanHU(card, true, isGANG))
         return make_pair("HU", "");
 
-    double Before = MarkingAverage();
-    //下面的所有判定都是把Before和After直接比较，但考虑到每种操作一定会以一定程度改变Average的值，此处需要不断优化参数
+    double Before = LowNum();
 
     if (CanGANG(card)) {
         double BeforeGANG = Before;
@@ -498,10 +510,10 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
                     hand.erase(j);
                     break;
                 }
-        AfterGANG = MarkingAverage();
+        AfterGANG = LowNum();
         for (int i = 0; i < 4; ++i)
             hand.push_back(card);
-        if (AfterGANG > BeforeGANG) {
+        if (IfAct(BeforeGANG, AfterGANG, "BUGANG")) {
             GANG(card, 0);
             return make_pair("GANG ", card);
         }
@@ -515,9 +527,9 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
                 hand.erase(i);
                 break;
             }
-        AfterBUGANG = MarkingAverage();
+        AfterBUGANG = LowNum();
         hand.push_back(card);
-        if (AfterBUGANG > BeforeBUGANG) {
+        if (IfAct(BeforeBUGANG, AfterBUGANG, "BUGANG")) {
             BUGANG(card);
             return make_pair("BUGANG ", card);
         }
@@ -544,8 +556,7 @@ pair<string, pair<string, string> > ActOthers(string card, bool islast, int supp
     if (CanHU(card, false, false))
         return make_pair("HU", make_pair("", ""));
 
-    double Before = MarkingAverage();
-    //下面的所有判定都是把Before和After直接比较，但考虑到每种操作一定会以一定程度改变Average的值，此处需要不断优化参数
+    double Before = LowNum();
 
     double CHILeftCompare = -1;
     double CHIMidCompare = -1;
@@ -562,7 +573,7 @@ pair<string, pair<string, string> > ActOthers(string card, bool islast, int supp
                     hand.erase(j);
                     break;
                 }
-        AfterCHILeft = MarkingAverage();
+        AfterCHILeft = LowNum();
         for (int i = 0; i < 3; ++i)
             hand.push_back(its[sti[card] + i]);
         if (IfAct(BeforeCHILeft, AfterCHILeft, "CHI"))
@@ -578,7 +589,7 @@ pair<string, pair<string, string> > ActOthers(string card, bool islast, int supp
                     hand.erase(j);
                     break;
                 }
-        AfterCHIMid = MarkingAverage();
+        AfterCHIMid = LowNum();
         for (int i = -1; i < 2; ++i)
             hand.push_back(its[sti[card] + i]);
         if (IfAct(BeforeCHIMid, AfterCHIMid, "CHI"))
@@ -594,7 +605,7 @@ pair<string, pair<string, string> > ActOthers(string card, bool islast, int supp
                     hand.erase(j);
                     break;
                 }
-        AfterCHIRight = MarkingAverage();
+        AfterCHIRight = LowNum();
         for (int i = -2; i < 1; ++i)
             hand.push_back(its[sti[card] + i]);
         if (IfAct(BeforeCHIRight, AfterCHIRight, "CHI"))
@@ -610,7 +621,7 @@ pair<string, pair<string, string> > ActOthers(string card, bool islast, int supp
                     hand.erase(j);
                     break;
                 }
-        AfterPENG = MarkingAverage();
+        AfterPENG = LowNum();
         for (int i = 0; i < 3; ++i)
             hand.push_back(card);
         if (IfAct(BeforePENG, AfterPENG, "PENG"))
@@ -626,7 +637,7 @@ pair<string, pair<string, string> > ActOthers(string card, bool islast, int supp
                     hand.erase(j);
                     break;
                 }
-        AfterGANG = MarkingAverage();
+        AfterGANG = LowNum();
         for (int i = 0; i < 4; ++i)
             hand.push_back(card);
         if (IfAct(BeforeGANG, AfterGANG, "GANG"))
