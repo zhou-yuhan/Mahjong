@@ -2,17 +2,17 @@
  * @Author: Xia Hanyu
  * @Date:   2020-05-05 10:55:15
  * @Last Modified by:   Xia Hanyu
- * @Last Modified time: 2020-05-05 12:13:48
+ * @Last Modified time: 2020-05-07 13:34:59
  */
- /**20200505 Zhou Yuhan Update
+ /**20200507 Zhou Yuhan Update
   ----------------------------------------
-  * 修复了AddPack() bug,将pack从手牌里移除
-  * 添加了CHI() PENG() BUGANG() GANG()，可以处理鸣牌
-  * 将权值转为struct params 便于以后调参
+  * 将所有打牌、碰、吃、杠形式统一
+  * 将Act()分为对摸牌和对他人打牌的反应，并分别用AfterDraw和ActOthers实现
+  * 将所有响应加入Act()
   ----------------------------------------
   * 下一步的计划：
-  * 把算法函数加入Act()
-  * 优化marking()的参数
+  * 判断吃碰杠胡是否执行
+  * 完善出牌函数，即进行局面评估
   */
 
 #include <iostream>
@@ -23,6 +23,7 @@
 #include <map>
 #include <set>
 #include <unordered_map>
+#include <limits>
 #include "MahjongGB/MahjongGB.h"
 
 using namespace std;
@@ -66,14 +67,14 @@ string its[34] = { "W1","W2","W3","W4","W5","W6","W7","W8","W9",
 
 map<string, int> sti;
 
-int NewNum(string name) {
+int NewNum(string card) {
     /**
      * @brief
      * 将牌名转换为数字
      * 用11-19表示W1-W9 31-39表示B1-B9 51-59表示T1-T9 F1=65 F2=70 F3=75 F4=80 J1=85 J2=90 J3=95
     */
-    char a1 = name[0];
-    char a2 = name[1];
+    char a1 = card[0];
+    char a2 = card[1];
     if (a1 == 'W') 
         return a2 - '0' + 10;
     if (a1 == 'B')
@@ -133,8 +134,8 @@ struct node
 node params;
 
 //给hand里的每张牌评分
-int Marking(string name) {
-    int x = NewNum(name);
+int Marking(string card) {
+    int x = NewNum(card);
     int mark = 0;
     int n20 = handset.count(x - 2);
     int n10 = handset.count(x - 1);
@@ -144,40 +145,40 @@ int Marking(string name) {
     mark += n00 * params.same;//相同牌的权重
     mark += (n10 > 0) * params.adjacent;
     mark += (n01 > 0) * params.adjacent;//相邻牌的权重
-    mark += (n10 > 0) * params.interval;
-    mark += (n01 > 0) * params.interval;//隔牌的权重
+    mark += (n20 > 0) * params.interval;
+    mark += (n02 > 0) * params.interval;//隔牌的权重
     
     // 处理还没有的牌的权重
     int k20 = 0;
-    if (sti[name] - 2 >= 0) {
-        auto it = known.find(its[sti[name] - 2]);
+    if (sti[card] - 2 >= 0) {
+        auto it = known.find(its[sti[card] - 2]);
         if (it != known.end())
-            k20 = 4 - known[its[sti[name] - 2]];
+            k20 = 4 - known[its[sti[card] - 2]];
         else
             k20 = 4;
     } 
     int k10 = 0;
-    if (sti[name] - 1 >= 0) {
-        auto it = known.find(its[sti[name] - 1]);
+    if (sti[card] - 1 >= 0) {
+        auto it = known.find(its[sti[card] - 1]);
         if (it != known.end())
-            k10 = 4 - known[its[sti[name] - 1]];
+            k10 = 4 - known[its[sti[card] - 1]];
         else
             k10 = 4;
     }
-    int k00 = 4 - known[name];
+    int k00 = 4 - known[card];
     int k02 = 0;
-    if (sti[name] + 2 < 27) {
-        auto it = known.find(its[sti[name] + 2]);
+    if (sti[card] + 2 < 27) {
+        auto it = known.find(its[sti[card] + 2]);
         if (it != known.end())
-            k02 = 4 - known[its[sti[name] + 2]];
+            k02 = 4 - known[its[sti[card] + 2]];
         else
             k02 = 4;
     }
     int k01 = 0;
-    if (sti[name] + 1 < 27) {
-        auto it = known.find(its[sti[name] + 1]);
+    if (sti[card] + 1 < 27) {
+        auto it = known.find(its[sti[card] + 1]);
         if (it != known.end())
-            k01 = 4 - known[its[sti[name] + 1]];
+            k01 = 4 - known[its[sti[card] + 1]];
         else
             k01 = 4;
     }
@@ -192,6 +193,23 @@ int Marking(string name) {
     if (n00 == 2)//(x)(x)的情况
         mark += k00 * params.unknown;
     return mark;
+}
+
+vector<string>::iterator CalMinTile() {  
+    /**
+     * @brief
+     * 返回最小权值牌的迭代器
+    */
+    auto result = hand.begin();
+    int minMark = numeric_limits<int>::max();
+    for(auto i = hand.begin(); i != hand.end(); ++i){
+        int mark = Marking(*i);
+        if(mark < minMark){
+            minMark = mark;
+            result = i;
+        }
+    }
+    return result;
 }
 
 /**
@@ -328,20 +346,13 @@ pair<string, int> Out(int k)
 
 /**
  * @brief
- * 以下内容是算法AI部分，可能需要大幅修改
- * @function
- * 1. HU()判断是否能胡
- * 2. CHI()判断是否能吃
- * 3. PENG()判断是否能碰
- * 4. BUGANG()判断是否能补杠，因为补杠输出信息不同于明暗杠
- * 5. Gang()判断能否明/暗杠
- * @notice
- * 存在一些问题，还没想好怎么处理
- * 1. 仅仅通过判断是否有连牌去判断能否吃/碰/杠，可能导致重复操作，比如已经有 T1 T2 T3,会再吃一张T1，打出T1(也可能打出别的牌)
- * 2. 如果判断能吃/碰/杠就操作了，好像也不太合理
+ * 以下内容是算法AI部分，可能需要修改
+ * 所有函数，CanXXX()判断能否操作，XXX()执行操作
+ * 对于XXX()函数，返回值一律为string，便于形式统一以及与之后函数(AfterDraw, ActOthers)对接
 */
-bool HU(string winTile, bool isZIMO, bool isGANG)
-{
+
+// 胡部分
+bool CanHU(string winTile, bool isZIMO, bool isGANG){
     MahjongInit(); // 初始化算番库
     bool isJUEZHANG = (known[winTile] == 3);
     bool isLast = (TileLeft == 0);
@@ -355,65 +366,142 @@ bool HU(string winTile, bool isZIMO, bool isGANG)
     return FanSum >= 8;
 }
 
-bool CHI(string card)
-{
+// 吃部分
+bool CanCHI(string card){
     int card_num = NewNum(card);
-    bool flag = false;
+    return (handset.find(card_num + 1) != handset.end() && handset.find(card_num + 2) != handset.end()) || // 吃左牌
+           (handset.find(card_num - 1) != handset.end() && handset.find(card_num + 1) != handset.end()) || // 吃中间
+           (handset.find(card_num - 1) != handset.end() && handset.find(card_num - 2) != handset.end()) ;  // 吃右牌
+}
+string CHI(string card){
+    int card_num = NewNum(card);
     string mid_card;
     int from;
     // 1. 吃左牌
     if(handset.find(card_num + 1) != handset.end() && handset.find(card_num + 2) != handset.end()){
-        flag = true;
         mid_card = its[sti[card] + 1];
         from = 1;
     }
     // 2. 吃中间
     if(handset.find(card_num - 1) != handset.end() && handset.find(card_num + 1) != handset.end()){
-        flag = true;
         mid_card = card;
         from = 2;
     }
     // 3. 吃右牌
     if(handset.find(card_num - 1) != handset.end() && handset.find(card_num - 2) != handset.end()){
-        flag = true;
         mid_card = its[sti[card] - 1];
         from = 3;
     }
-    if(flag){
-        AddPack("CHI", mid_card, from);
-    }
-    return flag;
+    AddPack("CHI", mid_card, from);
+    return mid_card;
 }
 
-bool PENG(string card, int from)
-{
+// 碰部分
+bool CanPENG(string card) {
     int card_num = NewNum(card);
-    if(handset.count(card_num) == 2){
-        AddPack("PENG", card, from);
-        return true;
-    }
-    return false;
+    return handset.count(card_num) == 2;
+}
+string PENG(string card, int supplier) {
+    AddPack("PENG", card, supplier);
+    return card;
 }
 
-bool BUGANG(string card)
-{   
+// 补杠部分
+bool CanBUGANG(string card) {   
     for(auto i = pack.begin(); i != pack.end(); ++i){
         if(i->first == "PENG" && (*i).second.first == card){
-            AddPack("GANG", card, 0, true);
             return true;
         }
     }
     return false;
 }
+string BUGANG(string card) { 
+    AddPack("GANG", card, 0, true);
+    return card; 
+}
 
-bool GANG(string card, int from)
-{
+// 杠部分
+bool CanGANG(string card) {
     int card_num = NewNum(card);
-    if(handset.count(card_num) == 3){
-        AddPack("GANG", card, from);
-        return true;
-    } 
-    return false;
+    return handset.count(card_num) == 3;
+}
+string GANG(string card, int supplier) { 
+    AddPack("GANG", card, supplier); 
+    return card;
+}
+
+// 出牌部分
+string PLAY(){
+    vector<string>::iterator out = CalMinTile();
+    string card = *out;
+    hand.erase(out);
+    return card;
+}
+
+pair<string, string> AfterDraw(string card, bool isGANG){ 
+    /**
+     * @brief
+     * 处理自己摸牌后的操作 --> PLAY GANG(暗) BUGANG HU
+     * @param
+     * 返回值：pair<string, string> --> command card
+     * command 执行的命令
+     * card 打出的牌/暗杠的牌
+     * 
+    */
+    if(CanHU(card, true, isGANG)){
+        if(/*需要胡*/)
+            return make_pair("HU", "");
+    }
+    if(CanGANG(card)){
+        if(/*需要暗杠*/){
+            GANG(card, 0);
+            return make_pair("GANG ", card);
+        }
+    }
+    if(CanBUGANG){
+        if(/*需要补杠*/){
+            BUGANG(card);
+            return make_pair("BUGANG ", card);
+        }
+    }
+    // 啥都不干就打出一张牌
+    return make_pair("PLAY ", PLAY());
+}
+
+pair<string, pair<string, string> > ActOthers(string card, bool islast, int supplier){
+    /**
+     * @brief
+     * 判断怎么处理别人的request
+     * @param
+     * 返回值：pair<string, pair<string, string> > --> command card1 card2 
+     * command 执行的命令
+     * card1 吃时为中间牌，其余为空 card2 操作后打出的牌，没有则为空
+     * card 别人打出的牌
+     * idlast 是否是上家打牌
+     * supplier 供牌方 (上家、下家、对家)
+    */
+    if(CanHU(card, false, false)){
+        if(/*需要胡*/)
+            return make_pair("HU", make_pair("", ""));
+    }
+    if(islast && CanCHI(card)){
+        if(/*需要吃*/)
+            return make_pair("CHI ", make_pair(CHI(card), PLAY()));
+    }
+    if(CanPENG(card)){
+        if(/*需要碰*/){
+            PENG(card, supplier);
+            return make_pair("PENG ", make_pair("", PLAY()));
+        }
+    }
+    if(CanGANG(card)){
+        if(/*需要杠*/){
+            GANG(card, supplier);
+            return make_pair("GANG ", make_pair("", ""));
+        }
+    }
+    // 啥都不干
+    return make_pair("PASS", make_pair("", ""));
 }
 
 void ProcessKnown()
@@ -599,37 +687,47 @@ void Act()
     else {
         sin.str(request[turnID]); // 本回合输入信息
         sin >> itmp;
-        /**
-         * 考虑把以下决策内容封装为函数 Draw() Peng() Chi()...
-         * 目前功能简单，先这么写吧
-        */
-        if (itmp == 2) { // 摸牌
+        // 1. 摸牌 -> PLAY GANG BUGANG HU
+        if (itmp == 2) { 
             sin >> stmp;
             hand.push_back(stmp);
-            /**
-             * 此处添加算法
-             * 暂时是傻傻的随机出牌
-            */
-            random_shuffle(hand.begin(), hand.end());
-            sout << "PLAY " << *hand.rbegin();
-            hand.pop_back();
+            auto act = AfterDraw(stmp, response[turnID - 1][0] == 'G' || response[turnID - 1][0] == 'B'); // 上回合是否杠牌
+            sout << act.first << act.second;
         }
-        else {
+        // 2. itmp == 3 他人操作
+        else { 
             sin >> idtmp;
             sin >> stmp;
-            //下面一行是必定会PASS的情况（补花、摸牌、杠或request来自自己）
+            // 补花、摸牌、杠或request来自自己 -> PASS
             if (idtmp == myPlayerID || stmp == "BUHUA" || stmp == "DRAW" || stmp == "GANG") {
                 sout << "PASS";
             }
-            else {
+            else { // 他人 PLAY PENG CHI BUGANG -> 判断进行操作
+                string card; // 除了BUGANG外都会打出一张牌, BUGANG时card是补杠的牌
+                // 做出的反应统一用act储存 command, card1, card2
+                pair<string, pair<string, string> > act;
+                // 1. 别人打牌
+                if(stmp == "PLAY"){ 
+                    sin >> card;
+                    act = ActOthers(card, idtmp == lastID(), CalPos(idtmp));
+                }
+                // 2. 别人补杠(抢杠胡)
                 if (stmp == "BUGANG") {
-                    //判断是否能够抢杠胡、是否抢杠胡
+                    sin >> card;
+                    if(CanHU(card, false, true) && /*需要抢杠胡*/)
+                        act = make_pair("HU", make_pair("", ""));
                 }
-                pair<string, int> ThisOut = Out(turnID);
-                if (idtmp == lastID()) {
-                    //判断是否能吃和是否要吃
+                // 3. 别人碰牌
+                if(stmp == "PENG"){
+                    sin >> card;
+                    act = ActOthers(card, idtmp == lastID(), CalPos(idtmp));
                 }
-                //判断是否能碰、杠、胡和是否要胡
+                // 4. 别人吃牌
+                if(stmp == "CHI"){
+                    sin >> card >> card;
+                    act = ActOthers(card, idtmp == lastID(), CalPos(idtmp));
+                }
+                sout << act.first << act.second.first << act.second.second;
             }
         }
     }
