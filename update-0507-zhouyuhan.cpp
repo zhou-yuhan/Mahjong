@@ -1,18 +1,21 @@
 /*
  * @Author: Xia Hanyu
  * @Date:   2020-05-05 10:55:15
- * @Last Modified by:   Xia Hanyu
- * @Last Modified time: 2020-05-07 13:34:59
+ * @Last Modified by:   Wen Tianyu
+ * @Last Modified time: 2020-05-07 15:43:00
  */
- /**20200507 Zhou Yuhan Update
+ /**20200507 Wen Tianyu Update
   ----------------------------------------
-  * 将所有打牌、碰、吃、杠形式统一
-  * 将Act()分为对摸牌和对他人打牌的反应，并分别用AfterDraw和ActOthers实现
-  * 将所有响应加入Act()
+  * 加入了MarkingAverage()函数计算整副牌面的评估值
+  * 将所有有关吃的操作完全割裂为吃左牌、吃中牌、吃右牌三个操作，方便比较、选择其中的最优操作
+  * 加入了IfAct()函数，用来返回不同情况（吃碰杠）下对MarkingAverage()函数在操作前后的变化的评估值
+  * 大幅修改了ActOthers()函数，现在可以比较不同可选操作的优劣性了
   ----------------------------------------
-  * 下一步的计划：
-  * 判断吃碰杠胡是否执行
-  * 完善出牌函数，即进行局面评估
+  * 后续优化重点：
+  * params的权重参数
+  * IfAct()的评估方式（具体表达式和参数）
+  * 现在胡牌（包括抢杠胡）没有策略，即能胡就胡，后续可以考虑判断是否要胡（不过这个不是工作重点，毕竟能胡就不错了/facepalm）
+  * 一些小顾虑：现在这个算平均值的策略还不知道可不可行，不过我觉得只要配合好IfAct()中的评估表达式就能实现高质量的评估
   */
 
 #include <iostream>
@@ -27,7 +30,6 @@
 #include "MahjongGB/MahjongGB.h"
 
 using namespace std;
-
 
 /**
  * @brief
@@ -75,7 +77,7 @@ int NewNum(string card) {
     */
     char a1 = card[0];
     char a2 = card[1];
-    if (a1 == 'W') 
+    if (a1 == 'W')
         return a2 - '0' + 10;
     if (a1 == 'B')
         return a2 - '0' + 30;
@@ -143,11 +145,11 @@ int Marking(string card) {
     int n01 = handset.count(x + 1);
     int n02 = handset.count(x + 2);
     mark += n00 * params.same;//相同牌的权重
-    mark += (n10 > 0) * params.adjacent;
-    mark += (n01 > 0) * params.adjacent;//相邻牌的权重
-    mark += (n20 > 0) * params.interval;
-    mark += (n02 > 0) * params.interval;//隔牌的权重
-    
+    mark += (n10 > 0)* params.adjacent;
+    mark += (n01 > 0)* params.adjacent;//相邻牌的权重
+    mark += (n20 > 0)* params.interval;
+    mark += (n02 > 0)* params.interval;//隔牌的权重
+
     // 处理还没有的牌的权重
     int k20 = 0;
     if (sti[card] - 2 >= 0) {
@@ -156,7 +158,7 @@ int Marking(string card) {
             k20 = 4 - known[its[sti[card] - 2]];
         else
             k20 = 4;
-    } 
+    }
     int k10 = 0;
     if (sti[card] - 1 >= 0) {
         auto it = known.find(its[sti[card] - 1]);
@@ -195,16 +197,26 @@ int Marking(string card) {
     return mark;
 }
 
-vector<string>::iterator CalMinTile() {  
+//用平均值给整副牌面评分
+double MarkingAverage() {
+    HandsetInit();
+    int Size = hand.size();
+    int TotalMark = 0;
+    for (auto i = hand.begin(); i != hand.end(); ++i)
+        TotalMark += Marking(*i);
+    return (double)TotalMark / Size;
+}
+
+vector<string>::iterator CalMinTile() {
     /**
      * @brief
      * 返回最小权值牌的迭代器
     */
     auto result = hand.begin();
     int minMark = numeric_limits<int>::max();
-    for(auto i = hand.begin(); i != hand.end(); ++i){
+    for (auto i = hand.begin(); i != hand.end(); ++i) {
         int mark = Marking(*i);
-        if(mark < minMark){
+        if (mark < minMark) {
             minMark = mark;
             result = i;
         }
@@ -227,11 +239,11 @@ void AddPack(string TYPE, string MidCard, int from = 0, bool is_BUGANG = false) 
     pack.push_back(make_pair(TYPE, make_pair(MidCard, from)));
     // 将自己鸣牌加入known, 并把pack从手牌里拿掉
     if (TYPE == "PENG") {
-        for (int i = 0; i < 2; ++i){ // 只需要两次，因为该回合request打出的牌已经添加过一次
+        for (int i = 0; i < 2; ++i) { // 只需要两次，因为该回合request打出的牌已经添加过一次
             AddKnown(MidCard);
             // vector没有find()，很伤心
-            for(auto j = hand.begin(); j != hand.end(); ++j){
-                if(*j == MidCard){
+            for (auto j = hand.begin(); j != hand.end(); ++j) {
+                if (*j == MidCard) {
                     hand.erase(j); break;
                 }
             }
@@ -240,10 +252,10 @@ void AddPack(string TYPE, string MidCard, int from = 0, bool is_BUGANG = false) 
     else if (TYPE == "CHI") {
         int CHIcard_code = from - 2; // 1 2 3 --> -1 0 1
         for (int i = -1; i <= 1; ++i) {
-            if (i != CHIcard_code){
+            if (i != CHIcard_code) {
                 AddKnown(its[sti[MidCard] + i]);
-                for(auto j = hand.begin(); j != hand.end(); ++j){
-                    if(*j == its[sti[MidCard] + i]){
+                for (auto j = hand.begin(); j != hand.end(); ++j) {
+                    if (*j == its[sti[MidCard] + i]) {
                         hand.erase(j); break;
                     }
                 }
@@ -253,28 +265,28 @@ void AddPack(string TYPE, string MidCard, int from = 0, bool is_BUGANG = false) 
     else if (TYPE == "GANG") {
         if (is_BUGANG) {
             AddKnown(MidCard);
-            for(auto j = hand.begin(); j != hand.end(); ++j){
-                if(*j == MidCard){
+            for (auto j = hand.begin(); j != hand.end(); ++j) {
+                if (*j == MidCard) {
                     hand.erase(j); break;
                 }
             }
         }
         else {
             if (from == 0) { // 暗杠
-                for (int i = 0; i < 4; ++i){
+                for (int i = 0; i < 4; ++i) {
                     AddKnown(MidCard);
-                    for(auto j = hand.begin(); j != hand.end(); ++j){
-                        if(*j == MidCard){
+                    for (auto j = hand.begin(); j != hand.end(); ++j) {
+                        if (*j == MidCard) {
                             hand.erase(j); break;
                         }
                     }
                 }
             }
             else { // 明杠
-                for (int i = 0; i < 3; ++i){
+                for (int i = 0; i < 3; ++i) {
                     AddKnown(MidCard);
-                    for(auto j = hand.begin(); j != hand.end(); ++j){
-                        if(*j == MidCard){
+                    for (auto j = hand.begin(); j != hand.end(); ++j) {
+                        if (*j == MidCard) {
                             hand.erase(j); break;
                         }
                     }
@@ -351,8 +363,24 @@ pair<string, int> Out(int k)
  * 对于XXX()函数，返回值一律为string，便于形式统一以及与之后函数(AfterDraw, ActOthers)对接
 */
 
+//IfAct()函数根据不同情况下MarkingAverage()的前后差异给出相应的判定标准(需要大幅度优化）
+double IfAct(double before, double after, string circum) {
+    if (circum == "GANG") {
+        return after - before;
+    }
+    if (circum == "CHI") {
+        return after - before;
+    }
+    if (circum == "PENG") {
+        return after - before;
+    }
+
+    //下面这个备选返回值没用
+    return 0;
+}
+
 // 胡部分
-bool CanHU(string winTile, bool isZIMO, bool isGANG){
+bool CanHU(string winTile, bool isZIMO, bool isGANG) {
     MahjongInit(); // 初始化算番库
     bool isJUEZHANG = (known[winTile] == 3);
     bool isLast = (TileLeft == 0);
@@ -367,32 +395,37 @@ bool CanHU(string winTile, bool isZIMO, bool isGANG){
 }
 
 // 吃部分
-bool CanCHI(string card){
+bool CanCHILeft(string card) {
+    int card_num = NewNum(card);
+    return (handset.find(card_num + 1) != handset.end() && handset.find(card_num + 2) != handset.end());
+}
+string CHILeft(string card) {
+    int card_num = NewNum(card);
+    string mid_card = its[sti[card] + 1];
+    AddPack("CHI", mid_card, 1);
+    return mid_card;
+}
+
+bool CanCHIMid(string card) {
+    int card_num = NewNum(card);
+    return (handset.find(card_num - 1) != handset.end() && handset.find(card_num + 1) != handset.end());
+}
+string CHIMid(string card) {
+    int card_num = NewNum(card);
+    AddPack("CHI", card, 2);
+    return card;
+}
+
+bool CanCHIRight(string card) {
     int card_num = NewNum(card);
     return (handset.find(card_num + 1) != handset.end() && handset.find(card_num + 2) != handset.end()) || // 吃左牌
-           (handset.find(card_num - 1) != handset.end() && handset.find(card_num + 1) != handset.end()) || // 吃中间
-           (handset.find(card_num - 1) != handset.end() && handset.find(card_num - 2) != handset.end()) ;  // 吃右牌
+        (handset.find(card_num - 1) != handset.end() && handset.find(card_num + 1) != handset.end()) || // 吃中间
+        (handset.find(card_num - 1) != handset.end() && handset.find(card_num - 2) != handset.end());  // 吃右牌
 }
-string CHI(string card){
+string CHIRight(string card) {
     int card_num = NewNum(card);
-    string mid_card;
-    int from;
-    // 1. 吃左牌
-    if(handset.find(card_num + 1) != handset.end() && handset.find(card_num + 2) != handset.end()){
-        mid_card = its[sti[card] + 1];
-        from = 1;
-    }
-    // 2. 吃中间
-    if(handset.find(card_num - 1) != handset.end() && handset.find(card_num + 1) != handset.end()){
-        mid_card = card;
-        from = 2;
-    }
-    // 3. 吃右牌
-    if(handset.find(card_num - 1) != handset.end() && handset.find(card_num - 2) != handset.end()){
-        mid_card = its[sti[card] - 1];
-        from = 3;
-    }
-    AddPack("CHI", mid_card, from);
+    string mid_card = its[sti[card] - 1];
+    AddPack("CHI", mid_card, 3);
     return mid_card;
 }
 
@@ -407,17 +440,17 @@ string PENG(string card, int supplier) {
 }
 
 // 补杠部分
-bool CanBUGANG(string card) {   
-    for(auto i = pack.begin(); i != pack.end(); ++i){
-        if(i->first == "PENG" && (*i).second.first == card){
+bool CanBUGANG(string card) {
+    for (auto i = pack.begin(); i != pack.end(); ++i) {
+        if (i->first == "PENG" && (*i).second.first == card) {
             return true;
         }
     }
     return false;
 }
-string BUGANG(string card) { 
+string BUGANG(string card) {
     AddPack("GANG", card, 0, true);
-    return card; 
+    return card;
 }
 
 // 杠部分
@@ -425,20 +458,20 @@ bool CanGANG(string card) {
     int card_num = NewNum(card);
     return handset.count(card_num) == 3;
 }
-string GANG(string card, int supplier) { 
-    AddPack("GANG", card, supplier); 
+string GANG(string card, int supplier) {
+    AddPack("GANG", card, supplier);
     return card;
 }
 
 // 出牌部分
-string PLAY(){
+string PLAY() {
     vector<string>::iterator out = CalMinTile();
     string card = *out;
     hand.erase(out);
     return card;
 }
 
-pair<string, string> AfterDraw(string card, bool isGANG){ 
+pair<string, string> AfterDraw(string card, bool isGANG) {
     /**
      * @brief
      * 处理自己摸牌后的操作 --> PLAY GANG(暗) BUGANG HU
@@ -446,62 +479,203 @@ pair<string, string> AfterDraw(string card, bool isGANG){
      * 返回值：pair<string, string> --> command card
      * command 执行的命令
      * card 打出的牌/暗杠的牌
-     * 
+     *
     */
-    if(CanHU(card, true, isGANG)){
-        if(/*需要胡*/)
-            return make_pair("HU", "");
-    }
-    if(CanGANG(card)){
-        if(/*需要暗杠*/){
+
+    //暂时先设定能胡就胡
+    if (CanHU(card, true, isGANG))
+        return make_pair("HU", "");
+
+    double Before = MarkingAverage();
+    //下面的所有判定都是把Before和After直接比较，但考虑到每种操作一定会以一定程度改变Average的值，此处需要不断优化参数
+
+    if (CanGANG(card)) {
+        double BeforeGANG = Before;
+        double AfterGANG;
+        for (int i = 0; i < 4; ++i)
+            for (auto j = hand.begin(); j != hand.end(); ++j)
+                if (*j == card) {
+                    hand.erase(j);
+                    break;
+                }
+        AfterGANG = MarkingAverage();
+        for (int i = 0; i < 4; ++i)
+            hand.push_back(card);
+        if (AfterGANG > BeforeGANG) {
             GANG(card, 0);
             return make_pair("GANG ", card);
         }
     }
-    if(CanBUGANG){
-        if(/*需要补杠*/){
+
+    if (CanBUGANG) {
+        double BeforeBUGANG = Before;
+        double AfterBUGANG;
+        for (auto i = hand.begin(); i != hand.end(); ++i)
+            if (*i == card) {
+                hand.erase(i);
+                break;
+            }
+        AfterBUGANG = MarkingAverage();
+        hand.push_back(card);
+        if (AfterBUGANG > BeforeBUGANG) {
             BUGANG(card);
             return make_pair("BUGANG ", card);
         }
     }
+
     // 啥都不干就打出一张牌
     return make_pair("PLAY ", PLAY());
 }
 
-pair<string, pair<string, string> > ActOthers(string card, bool islast, int supplier){
+pair<string, pair<string, string> > ActOthers(string card, bool islast, int supplier) {
     /**
      * @brief
      * 判断怎么处理别人的request
      * @param
-     * 返回值：pair<string, pair<string, string> > --> command card1 card2 
+     * 返回值：pair<string, pair<string, string> > --> command card1 card2
      * command 执行的命令
      * card1 吃时为中间牌，其余为空 card2 操作后打出的牌，没有则为空
      * card 别人打出的牌
-     * idlast 是否是上家打牌
+     * islast 是否是上家打牌
      * supplier 供牌方 (上家、下家、对家)
     */
-    if(CanHU(card, false, false)){
-        if(/*需要胡*/)
-            return make_pair("HU", make_pair("", ""));
+
+    //暂时先设定能胡就胡
+    if (CanHU(card, false, false))
+        return make_pair("HU", make_pair("", ""));
+
+    double Before = MarkingAverage();
+    //下面的所有判定都是把Before和After直接比较，但考虑到每种操作一定会以一定程度改变Average的值，此处需要不断优化参数
+
+    double CHILeftCompare = -1;
+    double CHIMidCompare = -1;
+    double CHIRightCompare = -1;
+    double PENGCompare = -1;
+    double GANGCompare = -1;
+
+    if (islast && CanCHILeft(card)) {
+        double BeforeCHILeft = Before;
+        double AfterCHILeft;
+        for (int i = 0; i < 3; ++i)
+            for (auto j = hand.begin(); j != hand.end(); ++j)
+                if (*j == its[sti[card] + i]) {
+                    hand.erase(j);
+                    break;
+                }
+        AfterCHILeft = MarkingAverage();
+        for (int i = 0; i < 3; ++i)
+            hand.push_back(its[sti[card] + i]);
+        if (IfAct(BeforeCHILeft, AfterCHILeft, "CHI"))
+            CHILeftCompare = IfAct(BeforeCHILeft, AfterCHILeft, "CHI"); 
     }
-    if(islast && CanCHI(card)){
-        if(/*需要吃*/)
-            return make_pair("CHI ", make_pair(CHI(card), PLAY()));
+
+    if (islast && CanCHIMid(card)) {
+        double BeforeCHIMid = Before;
+        double AfterCHIMid;
+        for (int i = -1; i < 2; ++i)
+            for (auto j = hand.begin(); j != hand.end(); ++j)
+                if (*j == its[sti[card] + i]) {
+                    hand.erase(j);
+                    break;
+                }
+        AfterCHIMid = MarkingAverage();
+        for (int i = -1; i < 2; ++i)
+            hand.push_back(its[sti[card] + i]);
+        if (IfAct(BeforeCHIMid, AfterCHIMid, "CHI"))
+            CHIMidCompare = IfAct(BeforeCHIMid, AfterCHIMid, "CHI");
     }
-    if(CanPENG(card)){
-        if(/*需要碰*/){
-            PENG(card, supplier);
-            return make_pair("PENG ", make_pair("", PLAY()));
-        }
+
+    if (islast && CanCHIRight(card)) {
+        double BeforeCHIRight = Before;
+        double AfterCHIRight;
+        for (int i = -2; i < 1; ++i)
+            for (auto j = hand.begin(); j != hand.end(); ++j)
+                if (*j == its[sti[card] + i]) {
+                    hand.erase(j);
+                    break;
+                }
+        AfterCHIRight = MarkingAverage();
+        for (int i = -2; i < 1; ++i)
+            hand.push_back(its[sti[card] + i]);
+        if (IfAct(BeforeCHIRight, AfterCHIRight, "CHI"))
+            CHIRightCompare = IfAct(BeforeCHIRight, AfterCHIRight, "CHI");
     }
-    if(CanGANG(card)){
-        if(/*需要杠*/){
-            GANG(card, supplier);
-            return make_pair("GANG ", make_pair("", ""));
-        }
+
+    if (CanPENG(card)) {
+        double BeforePENG = Before;
+        double AfterPENG;
+        for (int i = 0; i < 3; ++i)
+            for (auto j = hand.begin(); j != hand.end(); ++j)
+                if (*j == card) {
+                    hand.erase(j);
+                    break;
+                }
+        AfterPENG = MarkingAverage();
+        for (int i = 0; i < 3; ++i)
+            hand.push_back(card);
+        if (IfAct(BeforePENG, AfterPENG, "PENG"))
+            PENGCompare = IfAct(BeforePENG, AfterPENG, "PENG");
     }
-    // 啥都不干
-    return make_pair("PASS", make_pair("", ""));
+
+    if (CanGANG(card)) {
+        double BeforeGANG = Before;
+        double AfterGANG;
+        for (int i = 0; i < 4; ++i)
+            for (auto j = hand.begin(); j != hand.end(); ++j)
+                if (*j == card) {
+                    hand.erase(j);
+                    break;
+                }
+        AfterGANG = MarkingAverage();
+        for (int i = 0; i < 4; ++i)
+            hand.push_back(card);
+        if (IfAct(BeforeGANG, AfterGANG, "GANG"))
+            GANGCompare = IfAct(BeforeGANG, AfterGANG, "GANG");
+    }
+
+    if (CHILeftCompare == -1 && CHIRightCompare == -1 && CHIMidCompare == -1 && PENGCompare == -1 && GANGCompare == -1)
+        return make_pair("PASS", make_pair("", ""));
+
+    //下面这一大堆看起来特别长，其实只是用来处理同时能吃碰杠的时候选择哪个
+    double max = -1;
+    string flag = "";
+    if (CHILeftCompare > max) {
+        max = CHILeftCompare;
+        flag = "CHILeft";
+    }
+    if (CHIMidCompare > max) {
+        max = CHIMidCompare;
+        flag = "CHIMid";
+    }
+    if (CHIRightCompare > max) {
+        max = CHIRightCompare;
+        flag = "CHIRight";
+    }
+    if (PENGCompare > max) {
+        max = PENGCompare;
+        flag = "PENG";
+    }
+    if (GANGCompare > max) {
+        max = GANGCompare;
+        flag = "GANG";
+    }
+    if(flag=="CHILeft")
+        return make_pair("CHI", make_pair(CHILeft(card), PLAY()));
+    if(flag=="CHIMid")
+        return make_pair("CHI", make_pair(CHIMid(card), PLAY()));
+    if(flag=="CHIRight")
+        return make_pair("CHI", make_pair(CHIRight(card), PLAY()));
+    if (flag == "PENG") {
+        PENG(card, supplier);
+        return make_pair("PENG", make_pair("", PLAY()));
+    }
+    if(flag=="GANG") {
+        GANG(card, supplier);
+        return make_pair("GANG", make_pair("", ""));
+    }
+
+    //下面这个备选返回值没用
+    return make_pair("", make_pair("", ""));
 }
 
 void ProcessKnown()
@@ -672,7 +846,6 @@ void Initialize()
     }
 }
 
-
 void Act()
 {
     /**
@@ -688,42 +861,36 @@ void Act()
         sin.str(request[turnID]); // 本回合输入信息
         sin >> itmp;
         // 1. 摸牌 -> PLAY GANG BUGANG HU
-        if (itmp == 2) { 
+        if (itmp == 2) {
             sin >> stmp;
             hand.push_back(stmp);
             auto act = AfterDraw(stmp, response[turnID - 1][0] == 'G' || response[turnID - 1][0] == 'B'); // 上回合是否杠牌
             sout << act.first << act.second;
         }
         // 2. itmp == 3 他人操作
-        else { 
+        else {
             sin >> idtmp;
             sin >> stmp;
-            // 补花、摸牌、杠或request来自自己 -> PASS
-            if (idtmp == myPlayerID || stmp == "BUHUA" || stmp == "DRAW" || stmp == "GANG") {
+            if (idtmp == myPlayerID || stmp == "BUHUA" || stmp == "DRAW" || stmp == "GANG") {// 补花、摸牌、杠或request来自自己 -> PASS
                 sout << "PASS";
             }
             else { // 他人 PLAY PENG CHI BUGANG -> 判断进行操作
                 string card; // 除了BUGANG外都会打出一张牌, BUGANG时card是补杠的牌
-                // 做出的反应统一用act储存 command, card1, card2
-                pair<string, pair<string, string> > act;
-                // 1. 别人打牌
-                if(stmp == "PLAY"){ 
+                pair<string, pair<string, string> > act;// 做出的反应统一用act储存 command, card1, card2
+                if (stmp == "PLAY") {//别人打牌
                     sin >> card;
                     act = ActOthers(card, idtmp == lastID(), CalPos(idtmp));
                 }
-                // 2. 别人补杠(抢杠胡)
-                if (stmp == "BUGANG") {
+                if (stmp == "BUGANG") {//别人补杠(先默认能抢杠和就抢杠和)
                     sin >> card;
-                    if(CanHU(card, false, true) && /*需要抢杠胡*/)
+                    if (CanHU(card, false, true))
                         act = make_pair("HU", make_pair("", ""));
                 }
-                // 3. 别人碰牌
-                if(stmp == "PENG"){
+                if (stmp == "PENG") { //别人碰牌
                     sin >> card;
                     act = ActOthers(card, idtmp == lastID(), CalPos(idtmp));
                 }
-                // 4. 别人吃牌
-                if(stmp == "CHI"){
+                if (stmp == "CHI") {//别人吃牌
                     sin >> card >> card;
                     act = ActOthers(card, idtmp == lastID(), CalPos(idtmp));
                 }
