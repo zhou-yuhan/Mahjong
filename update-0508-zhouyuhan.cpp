@@ -1,15 +1,13 @@
 /*
  * @Author: Xia Hanyu
  * @Date:   2020-05-05 10:55:15
- * @Last Modified by:   Wen Tianyu
- * @Last Modified time: 2020-05-07 15:43:00
+ * @Last Modified by:   Xia Hanyu
+ * @Last Modified time: 2020-05-08 12:27:24
  */
  /**20200507 Wen Tianyu Update
   ----------------------------------------
-  * 加入了LowNum()函数计算整副牌面的评估值
-  * 将所有有关吃的操作完全割裂为吃左牌、吃中牌、吃右牌三个操作，方便比较、选择其中的最优操作
-  * 加入了IfAct()函数，用来返回不同情况（吃碰杠）下对LowNum()函数在操作前后的变化的评估值
-  * 大幅修改了ActOthers()函数，现在可以比较不同可选操作的优劣性了
+  * 对CHI PENG等函数进行修改，适应了新规则
+  * 将CHI PENG GANG等操作参数和返回值统一 使得结构更清晰
   ----------------------------------------
   * 后续优化重点：
   * params的权重参数
@@ -27,6 +25,7 @@
 #include <set>
 #include <unordered_map>
 #include <limits>
+#include <cstring>
 #include "MahjongGB/MahjongGB.h"
 
 using namespace std;
@@ -42,9 +41,8 @@ using namespace std;
  * handset 储存纯数字化的手牌
  * ostringstream istringstream 用于字符串和其他数据类型之间方便转换
  * myPlayerID 应该在吃牌的时候有用
- * quan 不知道有啥用
- * flowerCount 自己补花数
- * TileLeft 牌墙剩余牌数
+ * quan 圈风
+ * TileLeft[4] 四人剩下牌墙数量
  * lastout 储存上一回合打出了什么牌
  * its --> int to string
  * sti --> string to int
@@ -58,10 +56,9 @@ vector<string> hand;
 multiset<int> handset;
 ostringstream sout;
 istringstream sin;
-string lastout;
+string lastout; // 这个东西好像没用过？？？
 int myPlayerID, quan;
-int flowerCount;
-int TileLeft = 92; // 144 - 13 * 4
+int TileLeft[4];
 string its[34] = { "W1","W2","W3","W4","W5","W6","W7","W8","W9",
                    "B1","B2","B3","B4","B5","B6","B7","B8","B9",
                    "T1","T2","T3","T4","T5","T6","T7","T8","T9",
@@ -207,8 +204,8 @@ double MarkingAverage() {
     return (double)TotalMark / Size;
 }
 
-//LowNum()返回低于平均值的牌占整副牌面的比例
-double LowNum() {
+//LowRate()返回低于平均值的牌占整副牌面的比例
+double LowRate() {
     int n = 0;
     double Average = MarkingAverage();
     for (auto i = hand.begin(); i != hand.end(); ++i)
@@ -338,6 +335,14 @@ inline int lastID()
     return myPlayerID > 0 ? myPlayerID - 1 : 3;
 }
 
+inline int NextID(int x){
+    /**
+     * @brief
+     * 返回x玩家下家id
+    */
+    return (x + 1) % 4;
+}
+
 pair<string, int> Out(int k)
 {
     /**
@@ -370,7 +375,8 @@ pair<string, int> Out(int k)
  * @brief
  * 以下内容是算法AI部分，可能需要修改
  * 所有函数，CanXXX()判断能否操作，XXX()执行操作
- * 对于XXX()函数，返回值一律为string，便于形式统一以及与之后函数(AfterDraw, ActOthers)对接
+ * 对于CanXXX()函数，参数一律为 要操作的牌、供牌者ID 
+ * 对于XXX()函数，返回值一律为string，参数一律为要操作的牌、供牌者ID 便于形式统一以及与之后函数(AfterDraw, ActOthers)对接
 */
 
 //IfAct()函数根据不同情况下LowNum()的前后差异给出相应的判定标准(需要大幅度优化）
@@ -396,9 +402,15 @@ double IfAct(double before, double after, string circum) {
 bool CanHU(string winTile, bool isZIMO, bool isGANG) {
     MahjongInit(); // 初始化算番库
     bool isJUEZHANG = (known[winTile] == 3);
-    bool isLast = (TileLeft == 0);
+    bool isLast = false;
+    for(int i = 0; i < 4; ++i){
+        if(TileLeft[i] == 0){
+            isLast = true;
+            break;
+        }
+    }
     vector<pair<int, string> > result = MahjongFanCalculator(
-        pack, hand, winTile, flowerCount, isZIMO, isJUEZHANG, isGANG, isLast, myPlayerID, quan
+        pack, hand, winTile, 0, isZIMO, isJUEZHANG, isGANG, isLast, myPlayerID, quan
     );
     int FanSum = 0;
     for (auto i = result.begin(); i != result.end(); ++i) {
@@ -408,34 +420,41 @@ bool CanHU(string winTile, bool isZIMO, bool isGANG) {
 }
 
 // 吃部分
-bool CanCHILeft(string card) {
+// 1. 吃左牌
+bool CanCHILeft(string card, int supplierID) {
+    if(supplierID != lastID() || TileLeft[NextID(supplierID)] == 0)
+        return false;
     int card_num = NewNum(card);
     return (handset.find(card_num + 1) != handset.end() && handset.find(card_num + 2) != handset.end());
 }
-string CHILeft(string card) {
+string CHILeft(string card, int supplierID = -1) { // 吃的supplierID没用
     int card_num = NewNum(card);
     string mid_card = its[sti[card] + 1];
     AddPack("CHI", mid_card, 1);
     return mid_card;
 }
 
-bool CanCHIMid(string card) {
+// 2. 吃中间
+bool CanCHIMid(string card, int supplierID) {
+    if(supplierID != lastID() || TileLeft[NextID(supplierID)] == 0)
+        return false;
     int card_num = NewNum(card);
     return (handset.find(card_num - 1) != handset.end() && handset.find(card_num + 1) != handset.end());
 }
-string CHIMid(string card) {
+string CHIMid(string card, int supplierID = -1) {
     int card_num = NewNum(card);
     AddPack("CHI", card, 2);
     return card;
 }
 
-bool CanCHIRight(string card) {
+// 3. 吃右牌
+bool CanCHIRight(string card, int supplierID) {
+    if(supplierID != lastID() || TileLeft[NextID(supplierID)] == 0)
+        return false;
     int card_num = NewNum(card);
-    return (handset.find(card_num + 1) != handset.end() && handset.find(card_num + 2) != handset.end()) || // 吃左牌
-        (handset.find(card_num - 1) != handset.end() && handset.find(card_num + 1) != handset.end()) || // 吃中间
-        (handset.find(card_num - 1) != handset.end() && handset.find(card_num - 2) != handset.end());  // 吃右牌
+    return handset.find(card_num - 1) != handset.end() && handset.find(card_num - 2) != handset.end();
 }
-string CHIRight(string card) {
+string CHIRight(string card, int supplierID = -1) {
     int card_num = NewNum(card);
     string mid_card = its[sti[card] - 1];
     AddPack("CHI", mid_card, 3);
@@ -443,17 +462,19 @@ string CHIRight(string card) {
 }
 
 // 碰部分
-bool CanPENG(string card) {
+bool CanPENG(string card, int supplierID) {
+    if(TileLeft[NextID(supplierID)] == 0)
+        return false;
     int card_num = NewNum(card);
     return handset.count(card_num) == 2;
 }
-string PENG(string card, int supplier) {
-    AddPack("PENG", card, supplier);
+string PENG(string card, int supplierID) {
+    AddPack("PENG", card, CalPos(supplierID));
     return card;
 }
 
 // 补杠部分
-bool CanBUGANG(string card) {
+bool CanBUGANG(string card, int supplier = myPlayerID) {
     for (auto i = pack.begin(); i != pack.end(); ++i) {
         if (i->first == "PENG" && (*i).second.first == card) {
             return true;
@@ -461,18 +482,20 @@ bool CanBUGANG(string card) {
     }
     return false;
 }
-string BUGANG(string card) {
+string BUGANG(string card, int supplierID = myPlayerID) {
     AddPack("GANG", card, 0, true);
     return card;
 }
 
 // 杠部分
-bool CanGANG(string card) {
+bool CanGANG(string card, int supplierID) {
+    if(TileLeft[NextID(supplierID)] == 0 && supplierID != myPlayerID) // 自己摸牌杠不受下家牌荒限制
+        return false;
     int card_num = NewNum(card);
     return handset.count(card_num) == 3;
 }
-string GANG(string card, int supplier) {
-    AddPack("GANG", card, supplier);
+string GANG(string card, int supplierID) {
+    AddPack("GANG", card, CalPos(supplierID));
     return card;
 }
 
@@ -481,6 +504,7 @@ string PLAY() {
     vector<string>::iterator out = CalMinTile();
     string card = *out;
     hand.erase(out);
+    AddKnown(card);
     return card;
 }
 
@@ -499,9 +523,9 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
     if (CanHU(card, true, isGANG))
         return make_pair("HU", "");
 
-    double Before = LowNum();
+    double Before = LowRate();
 
-    if (CanGANG(card)) {
+    if (CanGANG(card, myPlayerID)) {
         double BeforeGANG = Before;
         double AfterGANG;
         for (int i = 0; i < 4; ++i)
@@ -510,7 +534,7 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
                     hand.erase(j);
                     break;
                 }
-        AfterGANG = LowNum();
+        AfterGANG = LowRate();
         for (int i = 0; i < 4; ++i)
             hand.push_back(card);
         if (IfAct(BeforeGANG, AfterGANG, "BUGANG")) {
@@ -519,7 +543,7 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
         }
     }
 
-    if (CanBUGANG) {
+    if (CanBUGANG(card, myPlayerID)) {
         double BeforeBUGANG = Before;
         double AfterBUGANG;
         for (auto i = hand.begin(); i != hand.end(); ++i)
@@ -527,7 +551,7 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
                 hand.erase(i);
                 break;
             }
-        AfterBUGANG = LowNum();
+        AfterBUGANG = LowRate();
         hand.push_back(card);
         if (IfAct(BeforeBUGANG, AfterBUGANG, "BUGANG")) {
             BUGANG(card);
@@ -539,7 +563,7 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
     return make_pair("PLAY ", PLAY());
 }
 
-pair<string, pair<string, string> > ActOthers(string card, bool islast, int supplier) {
+pair<string, pair<string, string> > ActOthers(string card, int supplierID) {
     /**
      * @brief
      * 判断怎么处理别人的request
@@ -548,23 +572,20 @@ pair<string, pair<string, string> > ActOthers(string card, bool islast, int supp
      * command 执行的命令
      * card1 吃时为中间牌，其余为空 card2 操作后打出的牌，没有则为空
      * card 别人打出的牌
-     * islast 是否是上家打牌
-     * supplier 供牌方 (上家、下家、对家)
+     * supplierID 供牌方ID
     */
 
     //暂时先设定能胡就胡
     if (CanHU(card, false, false))
         return make_pair("HU", make_pair("", ""));
 
-    double Before = LowNum();
+    double Before = LowRate();
 
-    double CHILeftCompare = -1;
-    double CHIMidCompare = -1;
-    double CHIRightCompare = -1;
-    double PENGCompare = -1;
-    double GANGCompare = -1;
+    enum {CHILeftCompare = 0, CHIMidCompare = 1, CHIRightCompare = 2, PENGCompare = 3, GANGCompare = 4};
+    double compares[5];
+    memset(compares, -1, sizeof(compares));
 
-    if (islast && CanCHILeft(card)) {
+    if (CanCHILeft(card, supplierID)) {
         double BeforeCHILeft = Before;
         double AfterCHILeft;
         for (int i = 0; i < 3; ++i)
@@ -573,14 +594,14 @@ pair<string, pair<string, string> > ActOthers(string card, bool islast, int supp
                     hand.erase(j);
                     break;
                 }
-        AfterCHILeft = LowNum();
+        AfterCHILeft = LowRate();
         for (int i = 0; i < 3; ++i)
             hand.push_back(its[sti[card] + i]);
         if (IfAct(BeforeCHILeft, AfterCHILeft, "CHI"))
-            CHILeftCompare = IfAct(BeforeCHILeft, AfterCHILeft, "CHI"); 
+            compares[CHILeftCompare] = IfAct(BeforeCHILeft, AfterCHILeft, "CHI"); 
     }
 
-    if (islast && CanCHIMid(card)) {
+    if (CanCHIMid(card, supplierID)) {
         double BeforeCHIMid = Before;
         double AfterCHIMid;
         for (int i = -1; i < 2; ++i)
@@ -589,14 +610,14 @@ pair<string, pair<string, string> > ActOthers(string card, bool islast, int supp
                     hand.erase(j);
                     break;
                 }
-        AfterCHIMid = LowNum();
+        AfterCHIMid = LowRate();
         for (int i = -1; i < 2; ++i)
             hand.push_back(its[sti[card] + i]);
         if (IfAct(BeforeCHIMid, AfterCHIMid, "CHI"))
-            CHIMidCompare = IfAct(BeforeCHIMid, AfterCHIMid, "CHI");
+            compares[CHIMidCompare] = IfAct(BeforeCHIMid, AfterCHIMid, "CHI");
     }
 
-    if (islast && CanCHIRight(card)) {
+    if (CanCHIRight(card, supplierID)) {
         double BeforeCHIRight = Before;
         double AfterCHIRight;
         for (int i = -2; i < 1; ++i)
@@ -605,14 +626,14 @@ pair<string, pair<string, string> > ActOthers(string card, bool islast, int supp
                     hand.erase(j);
                     break;
                 }
-        AfterCHIRight = LowNum();
+        AfterCHIRight = LowRate();
         for (int i = -2; i < 1; ++i)
             hand.push_back(its[sti[card] + i]);
         if (IfAct(BeforeCHIRight, AfterCHIRight, "CHI"))
-            CHIRightCompare = IfAct(BeforeCHIRight, AfterCHIRight, "CHI");
+            compares[CHIRightCompare] = IfAct(BeforeCHIRight, AfterCHIRight, "CHI");
     }
 
-    if (CanPENG(card)) {
+    if (CanPENG(card, supplierID)) {
         double BeforePENG = Before;
         double AfterPENG;
         for (int i = 0; i < 3; ++i)
@@ -621,14 +642,14 @@ pair<string, pair<string, string> > ActOthers(string card, bool islast, int supp
                     hand.erase(j);
                     break;
                 }
-        AfterPENG = LowNum();
+        AfterPENG = LowRate();
         for (int i = 0; i < 3; ++i)
             hand.push_back(card);
         if (IfAct(BeforePENG, AfterPENG, "PENG"))
-            PENGCompare = IfAct(BeforePENG, AfterPENG, "PENG");
+            compares[PENGCompare] = IfAct(BeforePENG, AfterPENG, "PENG");
     }
 
-    if (CanGANG(card)) {
+    if (CanGANG(card, supplierID)) {
         double BeforeGANG = Before;
         double AfterGANG;
         for (int i = 0; i < 4; ++i)
@@ -637,54 +658,45 @@ pair<string, pair<string, string> > ActOthers(string card, bool islast, int supp
                     hand.erase(j);
                     break;
                 }
-        AfterGANG = LowNum();
+        AfterGANG = LowRate();
         for (int i = 0; i < 4; ++i)
             hand.push_back(card);
         if (IfAct(BeforeGANG, AfterGANG, "GANG"))
-            GANGCompare = IfAct(BeforeGANG, AfterGANG, "GANG");
+            compares[GANGCompare] = IfAct(BeforeGANG, AfterGANG, "GANG");
     }
 
-    if (CHILeftCompare == -1 && CHIRightCompare == -1 && CHIMidCompare == -1 && PENGCompare == -1 && GANGCompare == -1)
+    // 不能鸣牌
+    bool doNothing = true;
+    for(int i = 0; i < 5; ++i){
+        if(compares[i] != -1){
+            doNothing = false;
+            break;
+        }
+    }
+    if (doNothing)
         return make_pair("PASS", make_pair("", ""));
 
-    //下面这一大堆看起来特别长，其实只是用来处理同时能吃碰杠的时候选择哪个
+    // 选取最佳选择
     double max = -1;
-    string flag = "";
-    if (CHILeftCompare > max) {
-        max = CHILeftCompare;
-        flag = "CHILeft";
+    int choice = 0;
+    for(int i = 0; i < 5; ++i){
+        if(compares[i] > max){
+            max = compares[i];
+            choice = i;
+        }
     }
-    if (CHIMidCompare > max) {
-        max = CHIMidCompare;
-        flag = "CHIMid";
+    switch(choice){
+        case CHILeftCompare: return make_pair("CHI", make_pair(CHILeft(card), PLAY()));
+        case CHIMidCompare: return make_pair("CHI", make_pair(CHIMid(card), PLAY()));
+        case CHIRightCompare: return make_pair("CHI", make_pair(CHIRight(card), PLAY()));
+        case PENGCompare: 
+            PENG(card, supplierID);
+            return make_pair("PENG", make_pair("", PLAY()));
+        case GANGCompare:
+            GANG(card, supplierID);
+            return make_pair("GANG", make_pair("", ""));            
     }
-    if (CHIRightCompare > max) {
-        max = CHIRightCompare;
-        flag = "CHIRight";
-    }
-    if (PENGCompare > max) {
-        max = PENGCompare;
-        flag = "PENG";
-    }
-    if (GANGCompare > max) {
-        max = GANGCompare;
-        flag = "GANG";
-    }
-    if(flag=="CHILeft")
-        return make_pair("CHI", make_pair(CHILeft(card), PLAY()));
-    if(flag=="CHIMid")
-        return make_pair("CHI", make_pair(CHIMid(card), PLAY()));
-    if(flag=="CHIRight")
-        return make_pair("CHI", make_pair(CHIRight(card), PLAY()));
-    if (flag == "PENG") {
-        PENG(card, supplier);
-        return make_pair("PENG", make_pair("", PLAY()));
-    }
-    if(flag=="GANG") {
-        GANG(card, supplier);
-        return make_pair("GANG", make_pair("", ""));
-    }
-
+    
     //下面这个备选返回值没用
     return make_pair("", make_pair("", ""));
 }
@@ -705,14 +717,12 @@ void ProcessKnown()
         sin.str(request[i]);
         sin >> itmp;
         if (itmp == 3) {
-            sin >> idtmp;
-            if (idtmp == myPlayerID)
+            sin >> idtmp >> stmp;
+            if(stmp == "DRAW")
+                TileLeft[idtmp]--;
+            if(idtmp == myPlayerID)
                 continue;
-            sin >> stmp;
-            if (stmp == "DRAW") {
-                TileLeft--;
-            }
-            else if (stmp == "PLAY") {
+            if (stmp == "PLAY") {
                 sin >> CardName;
                 AddKnown(CardName);
             }
@@ -818,6 +828,10 @@ void Initialize()
     // 初始化map sti
     for (int i = 0; i < 34; ++i)
         sti[its[i]] = i;
+    // 初始化TileLeft
+    for(int i = 0; i < 4; ++i){
+        TileLeft[i] = 21; // 34 - 13
+    }
     // 初始化手牌
     if (turnID < 2) {
         sin.clear();
@@ -830,12 +844,6 @@ void Initialize()
         sin.clear();
         sin.str(request[1]); // 第二回合
         sin >> itmp; // 编号
-        for (int j = 0; j < 4; j++) {
-            sin >> itmp; // 四个玩家花牌数
-            TileLeft -= itmp; // 补花减少牌墙牌的数量
-            if (j == myPlayerID)
-                flowerCount = itmp;
-        }
         for (int j = 0; j < 13; j++) { // 手牌
             sin >> stmp;
             hand.push_back(stmp);
@@ -890,7 +898,7 @@ void Act()
                 pair<string, pair<string, string> > act;// 做出的反应统一用act储存 command, card1, card2
                 if (stmp == "PLAY") {//别人打牌
                     sin >> card;
-                    act = ActOthers(card, idtmp == lastID(), CalPos(idtmp));
+                    act = ActOthers(card, idtmp);
                 }
                 if (stmp == "BUGANG") {//别人补杠(先默认能抢杠和就抢杠和)
                     sin >> card;
@@ -899,11 +907,11 @@ void Act()
                 }
                 if (stmp == "PENG") { //别人碰牌
                     sin >> card;
-                    act = ActOthers(card, idtmp == lastID(), CalPos(idtmp));
+                    act = ActOthers(card, idtmp);
                 }
-                if (stmp == "CHI") {//别人吃牌
+                if (stmp == "CHI") { // 别人吃牌
                     sin >> card >> card;
-                    act = ActOthers(card, idtmp == lastID(), CalPos(idtmp));
+                    act = ActOthers(card, idtmp);
                 }
                 sout << act.first << act.second.first << act.second.second;
             }
