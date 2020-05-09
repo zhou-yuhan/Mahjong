@@ -1,21 +1,17 @@
 /*
  * @Author: Xia Hanyu
  * @Date:   2020-05-05 10:55:15
- * @Last Modified by:   Wen Tianyu
- * @Last Modified time: 2020-05-09 01:46:00
+ * @Last Modified by:   Xia Hanyu
+ * @Last Modified time: 2020-05-10 00:54:39
  */
- /**20200509 Wen Tianyu Update
+ /**20200510 zhouyuhan Update
   ----------------------------------------
-  * Marking()函数现在有了新功能：
-    （1）字牌加权重
-    （2）19/28数字牌减权重（减的幅度不同） 
-    （3）存在同色不同数字牌时加权重（指数倍增加）
-    （4）存在同数字不同色牌时加权重（取最小值正比例增加）、相邻牌和相隔牌存在同数字不同色牌是加权重（加的幅度不同，取最小值正比例增加）
-    具体的权重参数及细节请在params结构中查阅注释
-  * 删除了原LowRate()函数，这个比例太过模糊，意义不大，舍弃
-  * 新的比例用BadRate()函数求值，求坏牌占整副牌的比例，坏牌的判定由新的变量BadcardLine（环牌分数线）唯一决定  ----> 注意：本条内参数需要优化设定值
-  * 完全更改了IfAct()函数，现在函数有六个参数，参数细节和判定规则见注释                                     ----> 注意：本条内参数需要优化设定值
-  * 根据判定规则的修改，AfterDraw()和ActOthers()函数也进行了修改，并完成了对IfAct()函数的调用匹配
+  * 对为了和botzone成功交互进行了不计其数的小修改，已经能玩到46回合
+  * 然而还是有点问题：
+  * 1. CHI后会打出已经成顺子的牌中的一个，然而我完全无法理解，因为按照程序这仿佛不可能
+  * 2. HU还没加进去
+  * 我觉得明早我可以彻底debug完成
+  * PS 本以为很快就能实现顺利交互，没想到现在快一点了还是没完成QAQ
   ----------------------------------------
   * 后续优化重点：
   * 下列参数需要优化设定值：
@@ -24,6 +20,10 @@
     （3）IfAct()函数中的判定条件（主要是可接受改变值的设定）
   * 根据番种再考虑一下增加Marking()函数的职能，让评估更加准确
   * 对整副牌还可以怎样进行评估需要一些奇思妙想（现在只有第二最小值、平均值和坏牌比例三个判定量，比较笼统）
+  * 
+  * 经过botzone上的几轮比赛，看出以下问题
+  * 1. 单张字牌因为会被特殊考虑权值，导致可能一直留在手牌里，而成为废牌
+  * 2. 后期依旧在吃、碰，没有考虑将牌，导致“不想胡”
   */
 
 #include <iostream>
@@ -36,7 +36,7 @@
 #include <unordered_map>
 #include <limits>
 #include <cstring>
-#include "MahjongGB/MahjongGB.h"
+//#include "MahjongGB/MahjongGB.h"
 
 using namespace std;
 
@@ -53,7 +53,6 @@ using namespace std;
  * myPlayerID 应该在吃牌的时候有用
  * quan 圈风
  * TileLeft[4] 四人剩下牌墙数量
- * lastout 储存上一回合打出了什么牌
  * its --> int to string
  * sti --> string to int
 */
@@ -66,7 +65,6 @@ vector<string> hand;
 multiset<int> handset;
 ostringstream sout;
 istringstream sin;
-string lastout; // 这个东西好像没用过？？？
 int myPlayerID, quan;
 int TileLeft[4];
 string its[34] = { "W1","W2","W3","W4","W5","W6","W7","W8","W9",
@@ -97,6 +95,7 @@ int NewNum(string card) {
 
 //用来把hand里的string转化成handset里的int储存起来方便评估每张牌的权重
 void HandsetInit() {
+    handset.clear();
     int len = hand.size();
     for (int i = 0; i < len; ++i) {
         string card = hand[i];
@@ -136,23 +135,26 @@ void AddKnown(string card)
  * @param
  * params 储存参数
 */
-struct node
-{
-    int same;//相同牌权重
-    int adjacent;//相邻牌权重
-    int interval;//隔牌权重
-    int unknown;//未知牌权重
-    int zipai;//字牌权重
-    int samezp;//相同字牌的权重：因为字牌同数字牌相比不能吃，肯定会损失一部分权重，所以对存在相同牌的字牌权重要增加，相当于放大了有相同牌时的权重增加值
-    int num19;//19数字牌权重
-    int num28;//28数字牌权重
-    int scolordnum;//same color && different number 同色不同数字牌的基础权重（每多一张权重增加一倍）
-    int snumdcolor;//same number && different color 同数字不同颜色牌的基础权重（越多权重越高，呈正比例增长,如果相邻、相隔牌也存在同样情况那么权重增加且有系数）
+struct node {
+    int same = 10;      //相同牌权重
+    int adjacent = 8;  //相邻牌权重
+    int interval = 6;  //隔牌权重
+    int unknown = 2;   //未知牌权重
+    int zipai = 5;     //字牌权重
+    int samezp = 5;  //相同字牌的权重：因为字牌同数字牌相比不能吃，肯定会损失一部分权重，所以对存在相同牌的字牌权重要增加，相当于放大了有相同牌时的权重增加值
+    int num19 = 3;   // 19数字牌权重
+    int num28 = 2;   // 28数字牌权重
+    int scolordnum = 3;  // same color && different number
+                     // 同色不同数字牌的基础权重（每多一张权重增加一倍）
+    int snumdcolor = 3;  // same number && different color
+                     // 同数字不同颜色牌的基础权重（越多权重越高，呈正比例增长,如果相邻、相隔牌也存在同样情况那么权重增加且有系数）
+
+    int threshold = 0; // IfAct()函数返回值超过此阈值，执行操作  初期此阈值可以设定小一些，后期保留将牌，阈值可以增大
 };
 
 node params;
 
-int BadcardLine;//坏牌分数线，低于该分数的牌称之为坏牌
+int BadcardLine;  //坏牌分数线，低于该分数的牌称之为坏牌
 
 //给hand里的每张牌评分
 int Marking(string card) {
@@ -251,7 +253,6 @@ int Marking(string card) {
 
 //计算牌的第二低分（因为第一低分的牌操作后一定会被打出去）
 int MinMark() {
-    HandsetInit();
     int Size = hand.size();
     int minmark = 100000;
     for (auto i = hand.begin(); i != hand.end(); ++i)
@@ -266,7 +267,6 @@ int MinMark() {
 
 //计算每张牌评分的平均值
 int MarkingAverage() {
-    HandsetInit();
     int Size = hand.size();
     int TotalMark = 0;
     for (auto i = hand.begin(); i != hand.end(); ++i)
@@ -281,23 +281,6 @@ double BadRate() {
         if (Marking(*i) < BadcardLine)
             ++n;
     return (double)n / hand.size();
-}
-
-vector<string>::iterator CalMinTile() {
-    /**
-     * @brief
-     * 返回最小权值牌的迭代器
-    */
-    auto result = hand.begin();
-    int minMark = numeric_limits<int>::max();
-    for (auto i = hand.begin(); i != hand.end(); ++i) {
-        int mark = Marking(*i);
-        if (mark < minMark) {
-            minMark = mark;
-            result = i;
-        }
-    }
-    return result;
 }
 
 /**
@@ -317,12 +300,7 @@ void AddPack(string TYPE, string MidCard, int from = 0, bool is_BUGANG = false) 
     if (TYPE == "PENG") {
         for (int i = 0; i < 2; ++i) { // 只需要两次，因为该回合request打出的牌已经添加过一次
             AddKnown(MidCard);
-            // vector没有find()，很伤心
-            for (auto j = hand.begin(); j != hand.end(); ++j) {
-                if (*j == MidCard) {
-                    hand.erase(j); break;
-                }
-            }
+            hand.erase(find(hand.begin(), hand.end(), MidCard));
         }
     }
     else if (TYPE == "CHI") {
@@ -330,42 +308,26 @@ void AddPack(string TYPE, string MidCard, int from = 0, bool is_BUGANG = false) 
         for (int i = -1; i <= 1; ++i) {
             if (i != CHIcard_code) {
                 AddKnown(its[sti[MidCard] + i]);
-                for (auto j = hand.begin(); j != hand.end(); ++j) {
-                    if (*j == its[sti[MidCard] + i]) {
-                        hand.erase(j); break;
-                    }
-                }
+                hand.erase(find(hand.begin(), hand.end(), its[sti[MidCard] + i]));
             }
         }
     }
     else if (TYPE == "GANG") {
         if (is_BUGANG) {
             AddKnown(MidCard);
-            for (auto j = hand.begin(); j != hand.end(); ++j) {
-                if (*j == MidCard) {
-                    hand.erase(j); break;
-                }
-            }
+            hand.erase(find(hand.begin(), hand.end(), MidCard));
         }
         else {
             if (from == 0) { // 暗杠
                 for (int i = 0; i < 4; ++i) {
                     AddKnown(MidCard);
-                    for (auto j = hand.begin(); j != hand.end(); ++j) {
-                        if (*j == MidCard) {
-                            hand.erase(j); break;
-                        }
-                    }
+                    hand.erase(find(hand.begin(), hand.end(), MidCard));
                 }
             }
             else { // 明杠
                 for (int i = 0; i < 3; ++i) {
                     AddKnown(MidCard);
-                    for (auto j = hand.begin(); j != hand.end(); ++j) {
-                        if (*j == MidCard) {
-                            hand.erase(j); break;
-                        }
-                    }
+                    hand.erase(find(hand.begin(), hand.end(), MidCard));
                 }
             }
         }
@@ -449,6 +411,7 @@ pair<string, int> Out(int k)
 */
 
 // 胡部分
+/*
 bool CanHU(string winTile, bool isZIMO, bool isGANG) {
     MahjongInit(); // 初始化算番库
     bool isJUEZHANG = (known[winTile] == 3);
@@ -468,6 +431,7 @@ bool CanHU(string winTile, bool isZIMO, bool isGANG) {
     }
     return FanSum >= 8;
 }
+*/
 
 // 吃部分
 // 1. 吃左牌
@@ -475,7 +439,7 @@ bool CanCHILeft(string card, int supplierID) {
     if (supplierID != lastID() || TileLeft[NextID(supplierID)] == 0)
         return false;
     int card_num = NewNum(card);
-    return (handset.find(card_num + 1) != handset.end() && handset.find(card_num + 2) != handset.end());
+    return handset.find(card_num + 1) != handset.end() && handset.find(card_num + 2) != handset.end();
 }
 string CHILeft(string card, int supplierID = -1) { // 吃的supplierID没用
     int card_num = NewNum(card);
@@ -489,7 +453,7 @@ bool CanCHIMid(string card, int supplierID) {
     if (supplierID != lastID() || TileLeft[NextID(supplierID)] == 0)
         return false;
     int card_num = NewNum(card);
-    return (handset.find(card_num - 1) != handset.end() && handset.find(card_num + 1) != handset.end());
+    return handset.find(card_num - 1) != handset.end() && handset.find(card_num + 1) != handset.end();
 }
 string CHIMid(string card, int supplierID = -1) {
     int card_num = NewNum(card);
@@ -542,7 +506,10 @@ bool CanGANG(string card, int supplierID) {
     if (TileLeft[NextID(supplierID)] == 0 && supplierID != myPlayerID) // 自己摸牌杠不受下家牌荒限制
         return false;
     int card_num = NewNum(card);
-    return handset.count(card_num) == 3;
+    if(supplierID != myPlayerID)
+        return handset.count(card_num) == 3;
+    else
+        return handset.count(card_num) == 4;
 }
 string GANG(string card, int supplierID) {
     AddPack("GANG", card, CalPos(supplierID));
@@ -551,9 +518,17 @@ string GANG(string card, int supplierID) {
 
 // 出牌部分
 string PLAY() {
-    vector<string>::iterator out = CalMinTile();
-    string card = *out;
-    hand.erase(out);
+    auto result = hand.begin();
+    int minMark = numeric_limits<int>::max();
+    for (auto i = hand.begin(); i != hand.end(); ++i) {
+        int mark = Marking(*i);
+        if (mark < minMark) {
+            minMark = mark;
+            result = i;
+        }
+    }
+    string card = *result;
+    hand.erase(result);
     AddKnown(card);
     return card;
 }
@@ -585,15 +560,16 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
     */
 
     //暂时先设定能胡就胡
-    if (CanHU(card, true, isGANG))
-        return make_pair("HU", "");
+    /*if (CanHU(card, true, isGANG))
+        return make_pair("HU", "");*/
 
+    HandsetInit();
     int BeforeMin = MinMark();
     int BeforeAverage = MarkingAverage();
     double BeforeRate = BadRate();
 
     if (CanGANG(card, myPlayerID)) {
-        int BGM = BeforeMin;//BGM=before GANG min 下述命名方式同理，不再注释
+        int BGM = BeforeMin; // BGM=before GANG min 下述命名方式同理，不再注释
         int BGA = BeforeAverage;
         double BGR = BeforeRate;
         int AGM;
@@ -610,7 +586,7 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
         AGR = BadRate();
         for (int i = 0; i < 4; ++i)
             hand.push_back(card);
-        if (IfAct(BGM, AGM, BGA, AGA, BGR, AGR)) {
+        if (IfAct(BGM, AGM, BGA, AGA, BGR, AGR) >= params.threshold) {
             GANG(card, 0);
             return make_pair("GANG ", card);
         }
@@ -632,7 +608,7 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
         ABA = MarkingAverage();
         ABR = BadRate();
         hand.push_back(card);
-        if (IfAct(BBM, ABM, BBA, ABA, BBR, ABR)) {
+        if (IfAct(BBM, ABM, BBA, ABA, BBR, ABR) >= params.threshold) {
             BUGANG(card);
             return make_pair("BUGANG ", card);
         }
@@ -655,16 +631,17 @@ pair<string, pair<string, string> > ActOthers(string card, int supplierID) {
     */
 
     //暂时先设定能胡就胡
-    if (CanHU(card, false, false))
-        return make_pair("HU", make_pair("", ""));
+    /*if (CanHU(card, false, false))
+        return make_pair("HU", make_pair("", ""));*/
 
+    HandsetInit();
     int BeforeMin = MinMark();
     int BeforeAverage = MarkingAverage();
     double BeforeRate = BadRate();
 
     enum { CHILeftCompare = 0, CHIMidCompare = 1, CHIRightCompare = 2, PENGCompare = 3, GANGCompare = 4 };
     double compares[5];
-    memset(compares, -1, sizeof(compares));
+    for(int i = 0; i < 5; ++i) compares[i] = -1;
 
     if (CanCHILeft(card, supplierID)) {
         int BCLM = BeforeMin;
@@ -684,7 +661,7 @@ pair<string, pair<string, string> > ActOthers(string card, int supplierID) {
         ACLR = BadRate();
         for (int i = 0; i < 3; ++i)
             hand.push_back(its[sti[card] + i]);
-        if (IfAct(BCLM, ACLM, BCLA, ACLA, BCLR, ACLR))
+        if (IfAct(BCLM, ACLM, BCLA, ACLA, BCLR, ACLR) >= params.threshold)
             compares[CHILeftCompare] = IfAct(BCLM, ACLM, BCLA, ACLA, BCLR, ACLR);
     }
 
@@ -706,7 +683,7 @@ pair<string, pair<string, string> > ActOthers(string card, int supplierID) {
         ACMR = BadRate();
         for (int i = -1; i < 2; ++i)
             hand.push_back(its[sti[card] + i]);
-        if (IfAct(BCMM, ACMM, BCMA, ACMA, BCMR, ACMR))
+        if (IfAct(BCMM, ACMM, BCMA, ACMA, BCMR, ACMR) >= params.threshold)
             compares[CHIMidCompare] = IfAct(BCMM, ACMM, BCMA, ACMA, BCMR, ACMR);
     }
 
@@ -728,7 +705,7 @@ pair<string, pair<string, string> > ActOthers(string card, int supplierID) {
         ACRR = BadRate();
         for (int i = -2; i < 1; ++i)
             hand.push_back(its[sti[card] + i]);
-        if (IfAct(BCRM, ACRM, BCRA, ACRA, BCRR, ACRR))
+        if (IfAct(BCRM, ACRM, BCRA, ACRA, BCRR, ACRR) >= params.threshold)
             compares[CHIRightCompare] = IfAct(BCRM, ACRM, BCRA, ACRA, BCRR, ACRR);
     }
 
@@ -750,7 +727,7 @@ pair<string, pair<string, string> > ActOthers(string card, int supplierID) {
         APR = BadRate();
         for (int i = 0; i < 3; ++i)
             hand.push_back(card);
-        if (IfAct(BPM, APM, BPA, APA, BPR, APR))
+        if (IfAct(BPM, APM, BPA, APA, BPR, APR) >= params.threshold)
             compares[PENGCompare] = IfAct(BPM, APM, BPA, APA, BPR, APR);
     }
 
@@ -772,7 +749,7 @@ pair<string, pair<string, string> > ActOthers(string card, int supplierID) {
         AGR = BadRate();
         for (int i = 0; i < 4; ++i)
             hand.push_back(card);
-        if (IfAct(BGM, AGM, BGA, AGA, BGR, AGR))
+        if (IfAct(BGM, AGM, BGA, AGA, BGR, AGR) >= params.threshold)
             compares[GANGCompare] = IfAct(BGM, AGM, BGA, AGA, BGR, AGR);
     }
 
@@ -797,12 +774,12 @@ pair<string, pair<string, string> > ActOthers(string card, int supplierID) {
         }
     }
     switch (choice) {
-    case CHILeftCompare: return make_pair("CHI", make_pair(CHILeft(card), PLAY()));
-    case CHIMidCompare: return make_pair("CHI", make_pair(CHIMid(card), PLAY()));
-    case CHIRightCompare: return make_pair("CHI", make_pair(CHIRight(card), PLAY()));
+    case CHILeftCompare: return make_pair("CHI ", make_pair(CHILeft(card) + " ", PLAY()));
+    case CHIMidCompare: return make_pair("CHI ", make_pair(CHIMid(card) + " ", PLAY()));
+    case CHIRightCompare: return make_pair("CHI ", make_pair(CHIRight(card) + " ", PLAY()));
     case PENGCompare:
         PENG(card, supplierID);
-        return make_pair("PENG", make_pair("", PLAY()));
+        return make_pair("PENG ", make_pair("", PLAY()));
     case GANGCompare:
         GANG(card, supplierID);
         return make_pair("GANG", make_pair("", ""));
@@ -820,6 +797,7 @@ void ProcessKnown()
      * 1. 将输入进来的所有信息中的明牌加入known哈希表
      * 包括 别人和自己打出的牌、别人的鸣牌、自己的鸣牌，总之已经被固定
      * 2. 将自己的鸣牌放入鸣牌库
+     * 3. 顺便处理摸牌
     */
     for (int i = 0; i <= turnID; ++i) {
         sin.clear();
@@ -827,42 +805,42 @@ void ProcessKnown()
         // 1. 所有request出现的明牌
         sin.str(request[i]);
         sin >> itmp;
+        if(itmp == 2) { // 摸牌
+            sin >> CardName;
+            hand.push_back(CardName);
+            TileLeft[myPlayerID]--;
+        }
         if (itmp == 3) {
             sin >> idtmp >> stmp;
-            if (stmp == "DRAW")
-                TileLeft[idtmp]--;
-            if (idtmp == myPlayerID)
-                continue;
-            if (stmp == "PLAY") {
-                sin >> CardName;
-                AddKnown(CardName);
-            }
-            else if (stmp == "PENG") {
-                sin >> CardName;
-                AddKnown(CardName);
-                AddKnown(Out(i - 1).first);
-                AddKnown(Out(i - 1).first);
-            }
-            else if (stmp == "CHI") {
-                sin >> CardName;
-                // 避免把上回合打出的牌重复加入Known
-                string CHIcard = Out(i - 1).first;
-                for (int i = -1; i <= 1; ++i) {
-                    if (sti[CardName] + i != sti[CHIcard])
-                        AddKnown(its[sti[CardName] + i]);
-                }
-                sin >> CardName;
-                AddKnown(CardName);
-            }
-            else if (stmp == "BUGANG") {
-                sin >> CardName;
-                AddKnown(CardName);
-            }
-            else if (stmp == "GANG") {
-                // 只处理明杠，因为暗杠也不知道杠的是啥
-                if (Out(i - 1).first != "NONE") {
-                    for (int j = 0; j < 4; ++j)
-                        AddKnown(Out(i - 1).first);
+            if (idtmp != myPlayerID) { // 自身request除不处理
+                if (stmp == "DRAW") 
+                    TileLeft[idtmp]--;
+                if (stmp == "PLAY") {
+                    sin >> CardName;
+                    AddKnown(CardName);
+                } else if (stmp == "PENG") {
+                    sin >> CardName;
+                    AddKnown(CardName);
+                    AddKnown(Out(i - 1).first);
+                    AddKnown(Out(i - 1).first);
+                } else if (stmp == "CHI") {
+                    sin >> CardName;
+                    // 避免把上回合打出的牌重复加入Known
+                    string CHIcard = Out(i - 1).first;
+                    for (int i = -1; i <= 1; ++i) {
+                        if (sti[CardName] + i != sti[CHIcard])
+                            AddKnown(its[sti[CardName] + i]);
+                    }
+                    sin >> CardName;
+                    AddKnown(CardName);
+                } else if (stmp == "BUGANG") {
+                    sin >> CardName;
+                    AddKnown(CardName);
+                } else if (stmp == "GANG") {
+                    // 只处理明杠，因为暗杠也不知道杠的是啥
+                    if (Out(i - 1).first != "NONE") {
+                        for (int j = 0; j < 4; ++j) AddKnown(Out(i - 1).first);
+                    }
                 }
             }
         }
@@ -874,10 +852,11 @@ void ProcessKnown()
         sin >> stmp;
         if (stmp == "PLAY") {
             sin >> CardName;
-            AddKnown(CardName);
+            hand.erase(find(hand.begin(), hand.end(), CardName));
         }
         else if (stmp == "PENG") {
             sin >> CardName; // 这是碰后打出的牌
+            hand.erase(find(hand.begin(), hand.end(), CardName));
             AddKnown(CardName);
             AddPack("PENG", Out(i).first, CalPos(Out(i).second));
         }
@@ -901,10 +880,9 @@ void ProcessKnown()
             AddPack("CHI", CardName, CalSupply(CardName, Out(i).first));
             sin >> CardName; // 打出牌
             AddKnown(CardName);
+            hand.erase(find(hand.begin(), hand.end(), CardName));
         }
     }
-    // 此时将手牌变为纯数字形式
-    HandsetInit();
 }
 
 void Input()
@@ -955,24 +933,11 @@ void Initialize()
         sin.clear();
         sin.str(request[1]); // 第二回合
         sin >> itmp; // 编号
+        sin >> itmp >> itmp >> itmp >> itmp; // 花牌数全为0
         for (int j = 0; j < 13; j++) { // 手牌
             sin >> stmp;
             hand.push_back(stmp);
         }
-        for (int i = 2; i < turnID; i++) { // 一二之后每回合的输入输出(不包括本回合)
-            sin.clear();
-            sin.str(request[i]);
-            sin >> itmp; // 输入指令编号
-            if (itmp == 2) { // 摸牌
-                sin >> stmp;
-                hand.push_back(stmp);
-                sin.clear();
-                sin.str(response[i]);
-                sin >> stmp >> stmp;
-                hand.erase(find(hand.begin(), hand.end(), stmp));
-            }
-        }
-        sin.clear();
     }
 }
 
@@ -993,7 +958,6 @@ void Act()
         // 1. 摸牌 -> PLAY GANG BUGANG HU
         if (itmp == 2) {
             sin >> stmp;
-            hand.push_back(stmp);
             auto act = AfterDraw(stmp, response[turnID - 1][0] == 'G' || response[turnID - 1][0] == 'B'); // 上回合是否杠牌
             sout << act.first << act.second;
         }
@@ -1011,11 +975,11 @@ void Act()
                     sin >> card;
                     act = ActOthers(card, idtmp);
                 }
-                if (stmp == "BUGANG") {//别人补杠(先默认能抢杠和就抢杠和)
+                /*if (stmp == "BUGANG") {//别人补杠(先默认能抢杠和就抢杠和)
                     sin >> card;
                     if (CanHU(card, false, true))
                         act = make_pair("HU", make_pair("", ""));
-                }
+                }*/
                 if (stmp == "PENG") { //别人碰牌
                     sin >> card;
                     act = ActOthers(card, idtmp);
@@ -1024,7 +988,7 @@ void Act()
                     sin >> card >> card;
                     act = ActOthers(card, idtmp);
                 }
-                sout << act.first << act.second.first << act.second.second;
+                sout << act.first <<  act.second.first << act.second.second;
             }
         }
     }
