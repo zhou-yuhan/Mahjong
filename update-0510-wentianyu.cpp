@@ -423,10 +423,7 @@ bool IfTING(string card) {
     MahjongInit();  // 初始化算番库
     for (auto i = known.begin(); i != known.end(); ++i) {
         if (i->second <= 2) {
-            auto k = hand.begin();
-            for (; k != hand.end(); ++k)
-                if (*k == card)
-                    break;
+            auto k = find(hand.begin(),hand.end(),card);
             hand.erase(k);
             hand.push_back(i->first);
             try {
@@ -606,11 +603,8 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
 
     //如果听牌就摸到啥打出啥，不再改变牌面
     if (IfTING(card)) {
-        for(auto i=hand.begin();i!=hand.end();++i)
-            if (*i == card) {
-                hand.erase(i);
-                break;
-            }
+        auto i = find(hand.begin(), hand.end(), card);
+        hand.erase(i);
         return make_pair("PLAY", card);
     }
 
