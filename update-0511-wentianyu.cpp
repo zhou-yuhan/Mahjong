@@ -317,15 +317,6 @@ int CoupleNum() {
     return cnt;
 }
 
-int Special_Fanzhong(int card) {
-    AllHandsetInit();
-
-    int Smark = 0;
-
-    //写好的各个特殊番种的函数可以放在下面
-
-}
-
 //给hand里的每张牌评分
 int Marking(string card) {
     int x = NewNum(card);
@@ -422,9 +413,7 @@ int Marking(string card) {
     if (n01 > 0 && n02 == 0)//(x)(x+1)的情况
         mark += (k02 * params.unknown + k10 * params.unknown);
     mark += k00 * params.unknown;
-
-    mark += Special_Fanzhong(x);
-
+ 
     return mark;
 }
 
