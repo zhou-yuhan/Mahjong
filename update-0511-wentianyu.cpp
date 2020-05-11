@@ -1,4 +1,21 @@
- //修复了算番器传13张牌进hand的bug
+/*
+下面这些番种都是依靠一副牌面的部分牌型来判定的，比较好写函数，只要存在这样的牌型，那么只要这个牌型里的所有牌的mark都变得很大很大，就能实现留住它们的效果
+1.小三元
+2.小四喜
+3.一色三同顺
+4.一色三节高
+5.清龙
+6.一色三步高
+8.三暗刻
+9.花龙
+10.三色三同顺
+11.三色三步高
+12.双箭刻
+*/
+
+
+
+
 
 #include <iostream>
 #include <string>
@@ -38,6 +55,7 @@ int idtmp;
 vector<string> request, response;
 vector<string> hand;
 multiset<int> handset;
+multiset<int> allhandset;
 ostringstream sout;
 istringstream sin;
 int myPlayerID, quan;
@@ -107,6 +125,153 @@ void AddKnown(string card)
 
 /**
  * @brief
+ * 以下内容存储自己鸣牌（吃、碰、杠得到的牌）
+ * @param
+ * pack 容器，为了与算番库匹配，定义为 vector<pair<string, pair<string, int> > > 详见算番库介绍
+ * @function
+ * AddPack 添加鸣牌,并自动加入known
+ * CalPos 计算玩家ID相对于自己是上家、对家、下家
+*/
+vector<pair<string, pair<string, int> > > pack;
+void AddPack(string TYPE, string MidCard, int from = 0, bool is_BUGANG = false) // is_BUGANG 用于区分暗杠和补杠
+{
+    pack.push_back(make_pair(TYPE, make_pair(MidCard, from)));
+    // 将自己鸣牌加入known, 并把pack从手牌里拿掉
+    if (TYPE == "PENG") {
+        for (int i = 0; i < 2; ++i) { // 只需要两次，因为该回合request打出的牌已经添加过一次
+            AddKnown(MidCard);
+            hand.erase(find(hand.begin(), hand.end(), MidCard));
+        }
+    }
+    else if (TYPE == "CHI") {
+        int CHIcard_code = from - 2; // 1 2 3 --> -1 0 1
+        for (int i = -1; i <= 1; ++i) {
+            if (i != CHIcard_code) {
+                AddKnown(its[sti[MidCard] + i]);
+                hand.erase(find(hand.begin(), hand.end(), its[sti[MidCard] + i]));
+            }
+        }
+    }
+    else if (TYPE == "GANG") {
+        if (is_BUGANG) {
+            AddKnown(MidCard);
+            hand.erase(find(hand.begin(), hand.end(), MidCard));
+        }
+        else {
+            if (from == 0) { // 暗杠
+                for (int i = 0; i < 4; ++i) {
+                    AddKnown(MidCard);
+                    hand.erase(find(hand.begin(), hand.end(), MidCard));
+                }
+            }
+            else { // 明杠
+                for (int i = 0; i < 3; ++i) {
+                    AddKnown(MidCard);
+                    hand.erase(find(hand.begin(), hand.end(), MidCard));
+                }
+            }
+        }
+    }
+}
+
+void AllHandsetInit() {
+    for (auto i = handset.begin(); i != handset.end(); ++i) {
+        int Card_Num = *i;
+        allhandset.insert(Card_Num);
+    }
+    for (auto i = pack.begin(); i != pack.end(); ++i) {
+        if (i->first == "CHI") {
+            string mid_card = (i->second).first;
+            allhandset.insert(NewNum(mid_card));
+            allhandset.insert(NewNum(mid_card) - 1);
+            allhandset.insert(NewNum(mid_card) + 1);
+        }
+        if (i->first == "PENG") {
+            string mid_card = (i->second).first;
+            for (int j = 0; j < 3; ++j)
+                allhandset.insert(NewNum(mid_card));
+        }
+        if (i->first == "GANG") {
+            string mid_card = (i->second).first;
+            for (int j = 0; j < 4; ++j)
+                allhandset.insert(NewNum(mid_card));
+        }
+    }
+}
+
+inline int CalPos(int x)
+{
+    if (x == myPlayerID)
+        return 0;
+    int previous = myPlayerID > 0 ? myPlayerID - 1 : 3;
+    int opposite = (myPlayerID + 2) % 4;
+    int next = (myPlayerID + 1) % 4;
+    if (x == previous) {
+        return 1;
+    }
+    else if (x == opposite) {
+        return 2;
+    }
+    else if (x == next) {
+        return 3;
+    }
+
+    //备选返回值没用
+    return -1;
+}
+
+inline int CalSupply(string MidCard, string SupplyCard)
+{
+    return 2 - (sti[MidCard] - sti[SupplyCard]);
+}
+
+inline int lastID()
+{
+    /**
+     * @brief
+     * 返回上家ID
+    */
+    return myPlayerID > 0 ? myPlayerID - 1 : 3;
+}
+
+inline int NextID(int x) {
+    /**
+     * @brief
+     * 返回x玩家下家id
+    */
+    return (x + 1) % 4;
+}
+
+pair<string, int> Out(int k)
+{
+    /**
+     * @brief
+     * 返回k回合打出的牌，如果没有打出，返回NONE
+     * 同时也要返回打牌玩家ID, 用于鸣牌时加入
+    */
+    istringstream ssin;
+    int InfoNum;
+    int playerID = -1;
+    string command;
+    string CardName = "NONE";
+
+    ssin.str(request[k]);
+    ssin >> InfoNum;
+    ssin >> playerID;
+    if (InfoNum >= 3) {
+        ssin >> command;
+        if (command == "PLAY" || command == "PENG") {
+            ssin >> CardName;
+        }
+        else if (command == "CHI") {
+            ssin >> CardName >> CardName;
+        }
+    }
+    return make_pair(CardName, playerID);
+}
+
+/**
+ * @brief
  * 用于计算牌面权值的参数
  * @param
  * params 储存参数
@@ -150,6 +315,15 @@ int CoupleNum() {
         if (handset.count(i) == 2)
             ++cnt;
     return cnt;
+}
+
+int Special_Fanzhong(int card) {
+    AllHandsetInit();
+
+    int Smark = 0;
+
+    //写好的各个特殊番种的函数可以放在下面
+
 }
 
 //给hand里的每张牌评分
@@ -248,6 +422,9 @@ int Marking(string card) {
     if (n01 > 0 && n02 == 0)//(x)(x+1)的情况
         mark += (k02 * params.unknown + k10 * params.unknown);
     mark += k00 * params.unknown;
+
+    mark += Special_Fanzhong(x);
+
     return mark;
 }
 
@@ -287,128 +464,6 @@ bool IfPENG() {
     if (turnID < 50 || handset.size()>9)
         return true;
     return CoupleNum() > 1;
-}
-
-/**
- * @brief
- * 以下内容存储自己鸣牌（吃、碰、杠得到的牌）
- * @param
- * pack 容器，为了与算番库匹配，定义为 vector<pair<string, pair<string, int> > > 详见算番库介绍
- * @function
- * AddPack 添加鸣牌,并自动加入known
- * CalPos 计算玩家ID相对于自己是上家、对家、下家
-*/
-vector<pair<string, pair<string, int> > > pack;
-void AddPack(string TYPE, string MidCard, int from = 0, bool is_BUGANG = false) // is_BUGANG 用于区分暗杠和补杠
-{
-    pack.push_back(make_pair(TYPE, make_pair(MidCard, from)));
-    // 将自己鸣牌加入known, 并把pack从手牌里拿掉
-    if (TYPE == "PENG") {
-        for (int i = 0; i < 2; ++i) { // 只需要两次，因为该回合request打出的牌已经添加过一次
-            AddKnown(MidCard);
-            hand.erase(find(hand.begin(), hand.end(), MidCard));
-        }
-    }
-    else if (TYPE == "CHI") {
-        int CHIcard_code = from - 2; // 1 2 3 --> -1 0 1
-        for (int i = -1; i <= 1; ++i) {
-            if (i != CHIcard_code) {
-                AddKnown(its[sti[MidCard] + i]);
-                hand.erase(find(hand.begin(), hand.end(), its[sti[MidCard] + i]));
-            }
-        }
-    }
-    else if (TYPE == "GANG") {
-        if (is_BUGANG) {
-            AddKnown(MidCard);
-            hand.erase(find(hand.begin(), hand.end(), MidCard));
-        }
-        else {
-            if (from == 0) { // 暗杠
-                for (int i = 0; i < 4; ++i) {
-                    AddKnown(MidCard);
-                    hand.erase(find(hand.begin(), hand.end(), MidCard));
-                }
-            }
-            else { // 明杠
-                for (int i = 0; i < 3; ++i) {
-                    AddKnown(MidCard);
-                    hand.erase(find(hand.begin(), hand.end(), MidCard));
-                }
-            }
-        }
-    }
-}
-
-inline int CalPos(int x)
-{
-    if (x == myPlayerID)
-        return 0;
-    int previous = myPlayerID > 0 ? myPlayerID - 1 : 3;
-    int opposite = (myPlayerID + 2) % 4;
-    int next = (myPlayerID + 1) % 4;
-    if (x == previous) {
-        return 1;
-    }
-    else if (x == opposite) {
-        return 2;
-    }
-    else if (x == next) {
-        return 3;
-    }
-
-    //备选返回值没用
-    return -1;
-}
-
-inline int CalSupply(string MidCard, string SupplyCard)
-{
-    return 2 - (sti[MidCard] - sti[SupplyCard]);
-}
-
-inline int lastID()
-{
-    /**
-     * @brief
-     * 返回上家ID
-    */
-    return myPlayerID > 0 ? myPlayerID - 1 : 3;
-}
-
-inline int NextID(int x) {
-    /**
-     * @brief
-     * 返回x玩家下家id
-    */
-    return (x + 1) % 4;
-}
-
-pair<string, int> Out(int k)
-{
-    /**
-     * @brief
-     * 返回k回合打出的牌，如果没有打出，返回NONE
-     * 同时也要返回打牌玩家ID, 用于鸣牌时加入
-    */
-    istringstream ssin;
-    int InfoNum;
-    int playerID = -1;
-    string command;
-    string CardName = "NONE";
-
-    ssin.str(request[k]);
-    ssin >> InfoNum;
-    ssin >> playerID;
-    if (InfoNum >= 3) {
-        ssin >> command;
-        if (command == "PLAY" || command == "PENG") {
-            ssin >> CardName;
-        }
-        else if (command == "CHI") {
-            ssin >> CardName >> CardName;
-        }
-    }
-    return make_pair(CardName, playerID);
 }
 
 /**
