@@ -1,29 +1,19 @@
 /*
  * @Author: Xia Hanyu
- * @Date:   2020-05-05 10:55:15
+ * @Date:   2020-05-11 16:22:34
  * @Last Modified by:   Xia Hanyu
- * @Last Modified time: 2020-05-11 11:12:43
+ * @Last Modified time: 2020-05-11 17:12:04
  */
- /**20200510 zhouyuhan Update
-  ----------------------------------------
-  * 对听牌系统进行了小改动
-  * 利用全局变量TING判断是否处于听牌状态
-  * CanTING在回合 >= 40 时调用，判断是否改变TING状态
-  * 当TING == true 时，摸牌后不胡直接打，别人打牌后不要碰（避免把将碰了），杠还是可以的嘛，吃在听牌时直接就胡了
-  * 
-  * 大问题！！！到了满足胡和听牌的条件为什么不胡/听牌？？？
-  * 1. 能胡牌的时候不胡
-  * 2. 听牌时不听，会拆掉将牌
-  * 应该是CanHU()的问题
-  * 小问题！ 东南西北中发白单牌会被留下，反而打出去有用的牌
-  ----------------------------------------
-  * 后续优化重点：
-  * 下列参数需要优化设定值：
-    （1）params结构体中设定的权重（可以参考CSDN上的那篇资料，权重值的设定是重中之重，其他参数都要以此为基准设定）
-    （2）BadcardLine坏牌分数线
-    （3）IfAct()函数中的判定条件（主要是可接受改变值的设定）
-  */
 
+/**
+ * update 2020-05-11 zhouyuhan
+ * ************************************************
+ * 对听牌做了一点调整
+ * 对Marking()字牌做了微小的调整，不会再手里拿张单字牌不动了
+ * 
+ * 
+ * ************************************************
+*/
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -62,6 +52,7 @@ int idtmp;
 vector<string> request, response;
 vector<string> hand;
 multiset<int> handset;
+multiset<int> allhandset;
 ostringstream sout;
 istringstream sin;
 int myPlayerID, quan;
@@ -131,191 +122,6 @@ void AddKnown(string card)
 
 /**
  * @brief
- * 用于计算牌面权值的参数
- * @param
- * params 储存参数
-*/
-
-//加了一个couple（对子）的权重，体现在Marking()里
-struct node {
-    int same = 10;     //相同牌权重
-    int adjacent = 8;  //相邻牌权重
-    int interval = 6;  //隔牌权重
-    int unknown = 2;   //未知牌权重
-    int zipai = 3;     //字牌权重
-    int samezp = 5;  //相同字牌的权重：因为字牌同数字牌相比不能吃，肯定会损失一部分权重，所以对存在相同牌的字牌权重要增加，相当于放大了有相同牌时的权重增加值
-    int num19 = 3;       // 19数字牌权重
-    int num28 = 2;       // 28数字牌权重
-    int scolordnum = 2;  // same color && different number
-                         // 同色不同数字牌的基础权重（每多一张权重增加一倍）
-    int snumdcolor = 2;  // same number && different color
-                         // 同数字不同颜色牌的基础权重（越多权重越高，呈正比例增长,如果相邻、相隔牌也存在同样情况那么权重增加且有系数）
-    int onlycouple = 10;  //保留将牌
-    int threshold = 0;
-};
-
-node params;
-
-int BadcardLine = 10;  //坏牌分数线，低于该分数的牌称之为坏牌
-
-//返回对子数
-int CoupleNum() {
-    HandsetInit();
-    int cnt = 0;
-    for (int i = 11; i < 20; ++i)
-        if (handset.count(i) == 2)
-            ++cnt;
-    for (int i = 31; i < 40; ++i)
-        if (handset.count(i) == 2)
-            ++cnt;
-    for (int i = 51; i < 60; ++i)
-        if (handset.count(i) == 2)
-            ++cnt;
-    for (int i = 65; i < 100; i += 5)
-        if (handset.count(i) == 2)
-            ++cnt;
-    return cnt;
-}
-
-//给hand里的每张牌评分
-int Marking(string card) {
-    int x = NewNum(card);
-    int mark = 0;
-
-    int n20 = handset.count(x - 2);
-    int n10 = handset.count(x - 1);
-    int n00 = handset.count(x);
-    int n01 = handset.count(x + 1);
-    int n02 = handset.count(x + 2);
-    mark += n00 * params.same;//相同牌的权重
-    mark += (n10 > 0)* params.adjacent;
-    mark += (n01 > 0)* params.adjacent;//相邻牌的权重
-    mark += (n20 > 0)* params.interval;
-    mark += (n02 > 0)* params.interval;//隔牌的权重
-
-    if (x > 60) {
-        mark += params.zipai;//字牌的权重
-        mark += params.samezp * handset.count(x);//相同字牌的权重
-    }
-
-    if (x % 10 == 1 || x % 10 == 9)
-        mark -= params.num19;//19数字牌的权重
-    if (x % 10 == 2 || x % 10 == 8)
-        mark -= params.num28;//28数字牌的权重
-
-    if (x < 60) {//如果是数字牌
-        if (handset.count(x - 2) > 0 || handset.count(x - 1) > 0 || handset.count(x + 1) > 0 || handset.count(x + 2) > 0) {
-            int temp1 = params.scolordnum;//同色不同数字牌越多，权重越高，且每增加一种数字权重增加值翻倍
-            for (int i = (x / 10) * 10 + 1; i < (x / 10 + 1) * 10; ++i)
-                if (handset.count(i) > 0) {
-                    mark += temp1;
-                    temp1 *= 2;
-                }
-        }
-        int Num1to9 = x % 10;//同数字不同色牌越多，权重越高，且呈正比例增加(当然，取该数字在不同色下的数量的最小值比较稳妥）
-        for (int i = 10; i <= 50; i += 20)
-            if (handset.count(i + Num1to9) > 0 && i + Num1to9 != x) {
-                mark += MyMin(handset.count(i + Num1to9), handset.count(x)) * params.snumdcolor;
-                if (handset.count(i + Num1to9 + 1) > 0 && handset.count(x + 1) > 0)//相邻右牌也存在同数字不同色时，权重增加
-                    mark += MyMin(handset.count(i + Num1to9 + 1), handset.count(x + 1)) * params.snumdcolor * 2;
-                if (handset.count(i + Num1to9 - 1) > 0 && handset.count(x - 1) > 0)//相邻左牌也存在同数字不同色时，权重增加
-                    mark += MyMin(handset.count(i + Num1to9 - 1), handset.count(x - 1)) * params.snumdcolor * 2;
-                if (handset.count(i + Num1to9 + 2) > 0 && handset.count(x + 2) > 0)//相邻右牌也存在同数字不同色时，权重增加，但是要比相邻时低一些
-                    mark += MyMin(handset.count(i + Num1to9 + 2), handset.count(x + 2)) * params.snumdcolor;
-                if (handset.count(i + Num1to9 - 2) > 0 && handset.count(x - 2) > 0)//相邻左牌也存在同数字不同色时，权重增加，但是要比相邻时低一些
-                    mark += MyMin(handset.count(i + Num1to9 - 2), handset.count(x - 2)) * params.snumdcolor;
-            }
-    }
-
-    if (handset.count(x) == 2 && CoupleNum() == 1)//保留将牌
-        mark += params.onlycouple;
-
-    // 处理还没有的牌的权重
-    int k20 = 0;
-    if (sti[card] - 2 >= 0) {
-        auto it = known.find(its[sti[card] - 2]);
-        if (it != known.end())
-            k20 = 4 - known[its[sti[card] - 2]];
-        else
-            k20 = 4;
-    }
-    int k10 = 0;
-    if (sti[card] - 1 >= 0) {
-        auto it = known.find(its[sti[card] - 1]);
-        if (it != known.end())
-            k10 = 4 - known[its[sti[card] - 1]];
-        else
-            k10 = 4;
-    }
-    int k00 = 4 - known[card];
-    int k02 = 0;
-    if (sti[card] + 2 < 27) {
-        auto it = known.find(its[sti[card] + 2]);
-        if (it != known.end())
-            k02 = 4 - known[its[sti[card] + 2]];
-        else
-            k02 = 4;
-    }
-    int k01 = 0;
-    if (sti[card] + 1 < 27) {
-        auto it = known.find(its[sti[card] + 1]);
-        if (it != known.end())
-            k01 = 4 - known[its[sti[card] + 1]];
-        else
-            k01 = 4;
-    }
-    if (n20 > 0 && n10 == 0)//(x-2)(x)的情况
-        mark += k10 * params.unknown;
-    if (n10 > 0 && n20 == 0)//(x-1)(x)的情况
-        mark += (k20 * params.unknown + k01 * params.unknown);
-    if (n02 > 0 && n01 == 0)//(x)(x+2)的情况
-        mark += k01 * params.unknown;
-    if (n01 > 0 && n02 == 0)//(x)(x+1)的情况
-        mark += (k02 * params.unknown + k10 * params.unknown);
-    mark += k00 * params.unknown;
-    return mark;
-}
-
-//计算牌的第二低分（因为第一低分的牌操作后一定会被打出去）
-int MinMark() {
-    int minmark = 100000;
-    for (auto i = hand.begin(); i != hand.end(); ++i)
-        if (Marking(*i) < minmark)
-            minmark = Marking(*i);
-    int min2mark = 100000;
-    for (auto i = hand.begin(); i != hand.end(); ++i)
-        if (Marking(*i) < min2mark && Marking(*i) != minmark)
-            min2mark = Marking(*i);
-    return min2mark;
-}
-
-//计算每张牌评分的平均值
-int MarkingAverage() {
-    int Size = hand.size();
-    int TotalMark = 0;
-    for (auto i = hand.begin(); i != hand.end(); ++i)
-        TotalMark += Marking(*i);
-    return TotalMark / Size;
-}
-
-//BadRate()返回坏牌占整副牌面的比例
-double BadRate() {
-    int n = 0;
-    for (auto i = hand.begin(); i != hand.end(); ++i)
-        if (Marking(*i) < BadcardLine)
-            ++n;
-    return (double)n / hand.size();
-}
-
-//前期随便碰，后期有至少一个对子能留下时再碰
-bool IfPENG() {
-    if (turnID < 50 || handset.size()>9)
-        return true;
-    return CoupleNum() > 1;
-}
-
-/**
- * @brief
  * 以下内容存储自己鸣牌（吃、碰、杠得到的牌）
  * @param
  * pack 容器，为了与算番库匹配，定义为 vector<pair<string, pair<string, int> > > 详见算番库介绍
@@ -361,6 +167,31 @@ void AddPack(string TYPE, string MidCard, int from = 0, bool is_BUGANG = false) 
                     hand.erase(find(hand.begin(), hand.end(), MidCard));
                 }
             }
+        }
+    }
+}
+
+void AllHandsetInit() {
+    for (auto i = handset.begin(); i != handset.end(); ++i) {
+        int Card_Num = *i;
+        allhandset.insert(Card_Num);
+    }
+    for (auto i = pack.begin(); i != pack.end(); ++i) {
+        if (i->first == "CHI") {
+            string mid_card = (i->second).first;
+            allhandset.insert(NewNum(mid_card));
+            allhandset.insert(NewNum(mid_card) - 1);
+            allhandset.insert(NewNum(mid_card) + 1);
+        }
+        if (i->first == "PENG") {
+            string mid_card = (i->second).first;
+            for (int j = 0; j < 3; ++j)
+                allhandset.insert(NewNum(mid_card));
+        }
+        if (i->first == "GANG") {
+            string mid_card = (i->second).first;
+            for (int j = 0; j < 4; ++j)
+                allhandset.insert(NewNum(mid_card));
         }
     }
 }
@@ -438,6 +269,192 @@ pair<string, int> Out(int k)
 
 /**
  * @brief
+ * 用于计算牌面权值的参数
+ * @param
+ * params 储存参数
+*/
+
+struct node {
+    int same = 10;     //相同牌权重
+    int adjacent = 8;  //相邻牌权重
+    int interval = 6;  //隔牌权重
+    int unknown = 2;   //未知牌权重
+    int zipai = 2;     //字牌权重
+    int samezp = 5;  //相同字牌的权重：因为字牌同数字牌相比不能吃，肯定会损失一部分权重，所以对存在相同牌的字牌权重要增加，相当于放大了有相同牌时的权重增加值
+    int num19 = 3;       // 19数字牌权重
+    int num28 = 2;       // 28数字牌权重
+    int scolordnum = 2;  // same color && different number
+                         // 同色不同数字牌的基础权重（每多一张权重增加一倍）
+    int snumdcolor = 2;  // same number && different color
+                         // 同数字不同颜色牌的基础权重（越多权重越高，呈正比例增长,如果相邻、相隔牌也存在同样情况那么权重增加且有系数）
+    int onlycouple = 100;  //保留将牌
+    int threshold = 0;
+};
+
+node params;
+
+int BadcardLine = 10;  //坏牌分数线，低于该分数的牌称之为坏牌
+
+//返回对子数
+int CoupleNum() {
+    HandsetInit();
+    int cnt = 0;
+    for (int i = 11; i < 20; ++i)
+        if (handset.count(i) == 2)
+            ++cnt;
+    for (int i = 31; i < 40; ++i)
+        if (handset.count(i) == 2)
+            ++cnt;
+    for (int i = 51; i < 60; ++i)
+        if (handset.count(i) == 2)
+            ++cnt;
+    for (int i = 65; i < 100; i += 5)
+        if (handset.count(i) == 2)
+            ++cnt;
+    return cnt;
+}
+
+//给hand里的每张牌评分
+int Marking(string card) {
+    int x = NewNum(card);
+    int mark = 0;
+
+    int n20 = handset.count(x - 2);
+    int n10 = handset.count(x - 1);
+    int n00 = handset.count(x);
+    int n01 = handset.count(x + 1);
+    int n02 = handset.count(x + 2);
+    mark += n00 * params.same;//相同牌的权重
+    mark += (n10 > 0)* params.adjacent;
+    mark += (n01 > 0)* params.adjacent;//相邻牌的权重
+    mark += (n20 > 0)* params.interval;
+    mark += (n02 > 0)* params.interval;//隔牌的权重
+
+    if (x > 60) {
+        mark += params.zipai; // 字牌的权重
+        mark += params.samezp * (handset.count(x) - 1); //经过对战，发现经常有后期保留单个字牌而打掉有用的牌，最后只能单调将字牌或者不能胡的局面，此处减一使得单个字牌赋分不再很高
+
+    }
+
+    if (x % 10 == 1 || x % 10 == 9)
+        mark -= params.num19;//19数字牌的权重
+    if (x % 10 == 2 || x % 10 == 8)
+        mark -= params.num28;//28数字牌的权重
+
+    if (x < 60) {//如果是数字牌
+        if (handset.count(x - 2) > 0 || handset.count(x - 1) > 0 || handset.count(x + 1) > 0 || handset.count(x + 2) > 0) {
+            int temp1 = params.scolordnum;//同色不同数字牌越多，权重越高，且每增加一种数字权重增加值翻倍
+            for (int i = (x / 10) * 10 + 1; i < (x / 10 + 1) * 10; ++i)
+                if (handset.count(i) > 0) {
+                    mark += temp1;
+                    temp1 *= 2;
+                }
+        }
+        int Num1to9 = x % 10;//同数字不同色牌越多，权重越高，且呈正比例增加(当然，取该数字在不同色下的数量的最小值比较稳妥）
+        for (int i = 10; i <= 50; i += 20)
+            if (handset.count(i + Num1to9) > 0 && i + Num1to9 != x) {
+                mark += MyMin(handset.count(i + Num1to9), handset.count(x)) * params.snumdcolor;
+                if (handset.count(i + Num1to9 + 1) > 0 && handset.count(x + 1) > 0)//相邻右牌也存在同数字不同色时，权重增加
+                    mark += MyMin(handset.count(i + Num1to9 + 1), handset.count(x + 1)) * params.snumdcolor * 2;
+                if (handset.count(i + Num1to9 - 1) > 0 && handset.count(x - 1) > 0)//相邻左牌也存在同数字不同色时，权重增加
+                    mark += MyMin(handset.count(i + Num1to9 - 1), handset.count(x - 1)) * params.snumdcolor * 2;
+                if (handset.count(i + Num1to9 + 2) > 0 && handset.count(x + 2) > 0)//相邻右牌也存在同数字不同色时，权重增加，但是要比相邻时低一些
+                    mark += MyMin(handset.count(i + Num1to9 + 2), handset.count(x + 2)) * params.snumdcolor;
+                if (handset.count(i + Num1to9 - 2) > 0 && handset.count(x - 2) > 0)//相邻左牌也存在同数字不同色时，权重增加，但是要比相邻时低一些
+                    mark += MyMin(handset.count(i + Num1to9 - 2), handset.count(x - 2)) * params.snumdcolor;
+            }
+    }
+
+    if (handset.count(x) == 2 && CoupleNum() == 1)//保留将牌
+        mark += params.onlycouple;
+
+    // 处理还没有的牌的权重
+    int k20 = 0;
+    if (sti[card] - 2 >= 0) {
+        auto it = known.find(its[sti[card] - 2]);
+        if (it != known.end())
+            k20 = 4 - known[its[sti[card] - 2]];
+        else
+            k20 = 4;
+    }
+    int k10 = 0;
+    if (sti[card] - 1 >= 0) {
+        auto it = known.find(its[sti[card] - 1]);
+        if (it != known.end())
+            k10 = 4 - known[its[sti[card] - 1]];
+        else
+            k10 = 4;
+    }
+    int k00 = 4 - known[card];
+    int k02 = 0;
+    if (sti[card] + 2 < 27) {
+        auto it = known.find(its[sti[card] + 2]);
+        if (it != known.end())
+            k02 = 4 - known[its[sti[card] + 2]];
+        else
+            k02 = 4;
+    }
+    int k01 = 0;
+    if (sti[card] + 1 < 27) {
+        auto it = known.find(its[sti[card] + 1]);
+        if (it != known.end())
+            k01 = 4 - known[its[sti[card] + 1]];
+        else
+            k01 = 4;
+    }
+    if (n20 > 0 && n10 == 0)//(x-2)(x)的情况
+        mark += k10 * params.unknown;
+    if (n10 > 0 && n20 == 0)//(x-1)(x)的情况
+        mark += (k20 * params.unknown + k01 * params.unknown);
+    if (n02 > 0 && n01 == 0)//(x)(x+2)的情况
+        mark += k01 * params.unknown;
+    if (n01 > 0 && n02 == 0)//(x)(x+1)的情况
+        mark += (k02 * params.unknown + k10 * params.unknown);
+    mark += k00 * params.unknown;
+ 
+    return mark;
+}
+
+//计算牌的第二低分（因为第一低分的牌操作后一定会被打出去）
+int MinMark() {
+    int minmark = 100000;
+    for (auto i = hand.begin(); i != hand.end(); ++i)
+        if (Marking(*i) < minmark)
+            minmark = Marking(*i);
+    int min2mark = 100000;
+    for (auto i = hand.begin(); i != hand.end(); ++i)
+        if (Marking(*i) < min2mark && Marking(*i) != minmark)
+            min2mark = Marking(*i);
+    return min2mark;
+}
+
+//计算每张牌评分的平均值
+int MarkingAverage() {
+    int Size = hand.size();
+    int TotalMark = 0;
+    for (auto i = hand.begin(); i != hand.end(); ++i)
+        TotalMark += Marking(*i);
+    return TotalMark / Size;
+}
+
+//BadRate()返回坏牌占整副牌面的比例
+double BadRate() {
+    int n = 0;
+    for (auto i = hand.begin(); i != hand.end(); ++i)
+        if (Marking(*i) < BadcardLine)
+            ++n;
+    return (double)n / hand.size();
+}
+
+//前期随便碰，后期有至少一个对子能留下时再碰
+bool IfPENG() {
+    if (turnID < 50 || handset.size()>9)
+        return true;
+    return CoupleNum() > 1;
+}
+
+/**
+ * @brief
  * 以下内容是算法AI部分，可能需要修改
  * 所有函数，CanXXX()判断能否操作，XXX()执行操作
  * 对于CanXXX()函数，参数一律为 要操作的牌、供牌者ID
@@ -447,7 +464,10 @@ pair<string, int> Out(int k)
 // 胡部分
 bool CanHU(string winTile, bool isZIMO, bool isGANG) {
     MahjongInit();  // 初始化算番库
-    if (!isZIMO) hand.push_back(winTile);
+    if (isZIMO) {
+        auto i = find(hand.begin(), hand.end(), winTile);
+        hand.erase(i);
+    }
     bool isJUEZHANG = (known[winTile] == 3);
     bool isLast = false;
     for (int i = 0; i < 4; ++i) {
@@ -464,11 +484,13 @@ bool CanHU(string winTile, bool isZIMO, bool isGANG) {
         for (auto i = result.begin(); i != result.end(); ++i) {
             FanSum += i->first;
         }
-        if (!isZIMO) hand.pop_back();
+        if(isZIMO)
+            hand.push_back(winTile);
         return FanSum >= 8;
     }
     catch (const string & error) {
-        if (!isZIMO) hand.pop_back();
+        if(isZIMO)
+            hand.push_back(winTile);
         return false;
     }
 }
@@ -476,19 +498,29 @@ bool CanHU(string winTile, bool isZIMO, bool isGANG) {
 // 听部分
 void CanTING() {
     /**
-     * @brief 
+     * @brief
      * 改变TING变量的状态
+     * 查找可以听的牌应该查找所有牌，对于known里没有的牌，最应该听但却没有包括
     */
-    if(TING) return;
     MahjongInit();  // 初始化算番库
     int TING_num = 0; // 可以听的牌，多于特定数字才决定听牌，减小可以胡的牌全部在别人手里的可能
-    for (auto i = known.begin(); i != known.end(); ++i) {
-        if (i->second < 4) {   
-            if(CanHU(i->first, false, false))
-                TING_num += 4 - i->second;
+    for(int i = 0; i < 34; ++i){
+        string card = its[i];
+        if(CanHU(card, false, false)){
+            if(known.find(card) != known.end()){
+                TING_num += 4 - known[card] - cout(hand.begin(), hand.end(), card); // 要减去手里有的牌，防止自己手持一堆要胡的牌还不知道
+            }else{
+                TING_num += 4 - cout(hand.begin(), hand.end(), card);
+            }
         }
     }
-    if(TING_num >= 2) TING = true;
+    int least;
+    if(turnID >= 100) // 100回合之后了，快没牌了，就算只有一张也要等
+        least = 1;
+    else
+        least = 2; 
+    if(TING_num >= least)
+        TING = true;
 }
 
 // 吃部分
@@ -544,7 +576,7 @@ string PENG(string card, int supplierID) {
 
 // 补杠部分
 bool CanBUGANG(string card, int supplier = myPlayerID) {
-    if(TileLeft[myPlayerID] == 0) // 我以为这里不会有非法操作了，结果刚刚一句真就补杠了最后一张牌
+    if (TileLeft[myPlayerID] == 0) // 我以为这里不会有非法操作了，结果刚刚一句真就补杠了最后一张牌
         return false;
     for (auto i = pack.begin(); i != pack.end(); ++i) {
         if (i->first == "PENG" && (*i).second.first == card) {
@@ -560,7 +592,7 @@ string BUGANG(string card, int supplierID = myPlayerID) {
 
 // 杠部分
 bool CanGANG(string card, int supplierID) {
-    if(TileLeft[myPlayerID] == 0) 
+    if (TileLeft[myPlayerID] == 0)
         return false;
     if (TileLeft[NextID(supplierID)] == 0 && supplierID != myPlayerID) // 自己摸牌杠不受下家牌荒限制
         return false;
@@ -623,11 +655,11 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
         return make_pair("HU", "");
 
     //如果听牌就摸到啥打出啥，不再改变牌面
-    if(TING){
+    if (TING) {
         hand.erase(find(hand.begin(), hand.end(), card));
         return make_pair("PLAY ", card);
     }
-       
+
     HandsetInit();
     int BeforeMin = MinMark();
     int BeforeAverage = MarkingAverage();
@@ -885,8 +917,8 @@ void ProcessKnown()
         sin.str(request[i]);
         sin >> itmp;
         if (itmp == 2) { // 摸牌
-            sin >> CardName;
-            hand.push_back(CardName);
+            sin >> stmp;
+            hand.push_back(stmp);
             TileLeft[myPlayerID]--;
         }
         if (itmp == 3) {
@@ -966,7 +998,7 @@ void ProcessKnown()
             hand.erase(find(hand.begin(), hand.end(), CardName));
         }
     }
-    if(turnID >= 40)
+    if (turnID >= 40)
         CanTING();
 }
 
