@@ -2,7 +2,7 @@
  * @Author: Xia Hanyu
  * @Date:   2020-05-11 16:22:34
  * @Last Modified by:   Xia Hanyu
- * @Last Modified time: 2020-05-11 17:12:04
+ * @Last Modified time: 2020-05-11 17:20:32
  */
 
 /**
@@ -24,7 +24,7 @@
 #include <unordered_map>
 #include <limits>
 #include <cstring>
-#include "MahjongGB/MahjongGB.h"
+//#include "MahjongGB/MahjongGB.h"
 
 using namespace std;
 
@@ -507,10 +507,15 @@ void CanTING() {
     for(int i = 0; i < 34; ++i){
         string card = its[i];
         if(CanHU(card, false, false)){
+            int hand_num = 0;
+            for(auto i = hand.begin(); i != hand.end(); ++i){
+                if(*i == card)
+                    hand_num++;
+            }
             if(known.find(card) != known.end()){
-                TING_num += 4 - known[card] - cout(hand.begin(), hand.end(), card); // 要减去手里有的牌，防止自己手持一堆要胡的牌还不知道
+                TING_num += 4 - known[card] - hand_num // 要减去手里有的牌，防止自己手持一堆要胡的牌还不知道
             }else{
-                TING_num += 4 - cout(hand.begin(), hand.end(), card);
+                TING_num += 4 - hand_num;
             }
         }
     }
