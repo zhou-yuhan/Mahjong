@@ -1,4 +1,4 @@
-//加入了IfTING()函数，可以通过判断是否听牌更接近胡牌
+ //修复了算番器传13张牌进hand的bug
 
 #include <iostream>
 #include <string>
@@ -27,6 +27,7 @@ using namespace std;
  * myPlayerID 应该在吃牌的时候有用
  * quan 圈风
  * TileLeft[4] 四人剩下牌墙数量
+ * TING 是否处于听牌状态
  * its --> int to string
  * sti --> string to int
 */
@@ -41,6 +42,7 @@ ostringstream sout;
 istringstream sin;
 int myPlayerID, quan;
 int TileLeft[4];
+bool TING = false;
 string its[34] = { "W1","W2","W3","W4","W5","W6","W7","W8","W9",
                    "B1","B2","B3","B4","B5","B6","B7","B8","B9",
                    "T1","T2","T3","T4","T5","T6","T7","T8","T9",
@@ -110,22 +112,21 @@ void AddKnown(string card)
  * params 储存参数
 */
 
-//加了一个couple（对子）的权重，体现在Marking()里
-struct node
-{
-    int same = 10;//相同牌权重
-    int adjacent = 8;//相邻牌权重
-    int interval = 6;//隔牌权重
-    int unknown = 2;//未知牌权重
-    int zipai = 3;//字牌权重
-    int samezp = 5;//相同字牌的权重：因为字牌同数字牌相比不能吃，肯定会损失一部分权重，所以对存在相同牌的字牌权重要增加，相当于放大了有相同牌时的权重增加值
-    int num19 = 3;//19数字牌权重
-    int num28 = 2;//28数字牌权重
-    int scolordnum = 2;//same color && different number 同色不同数字牌的基础权重（每多一张权重增加一倍）
-    int snumdcolor = 2;//same number && different color 同数字不同颜色牌的基础权重（越多权重越高，呈正比例增长,如果相邻、相隔牌也存在同样情况那么权重增加且有系数）
-    int onlycouple = 10;//保留将牌
+struct node {
+    int same = 10;     //相同牌权重
+    int adjacent = 8;  //相邻牌权重
+    int interval = 6;  //隔牌权重
+    int unknown = 2;   //未知牌权重
+    int zipai = 2;     //字牌权重
+    int samezp = 5;  //相同字牌的权重：因为字牌同数字牌相比不能吃，肯定会损失一部分权重，所以对存在相同牌的字牌权重要增加，相当于放大了有相同牌时的权重增加值
+    int num19 = 3;       // 19数字牌权重
+    int num28 = 2;       // 28数字牌权重
+    int scolordnum = 2;  // same color && different number
+                         // 同色不同数字牌的基础权重（每多一张权重增加一倍）
+    int snumdcolor = 2;  // same number && different color
+                         // 同数字不同颜色牌的基础权重（越多权重越高，呈正比例增长,如果相邻、相隔牌也存在同样情况那么权重增加且有系数）
+    int onlycouple = 100;  //保留将牌
     int threshold = 0;
-    
 };
 
 node params;
@@ -418,37 +419,13 @@ pair<string, int> Out(int k)
  * 对于XXX()函数，返回值一律为string，参数一律为要操作的牌、供牌者ID 便于形式统一以及与之后函数(AfterDraw, ActOthers)对接
 */
 
-//判定是否听牌
-bool IfTING(string card) {
-    MahjongInit();  // 初始化算番库
-    for (auto i = known.begin(); i != known.end(); ++i) {
-        if (i->second <= 2) {
-            auto k = find(hand.begin(),hand.end(),card);
-            hand.erase(k);
-            hand.push_back(i->first);
-            try {
-                vector<pair<int, string> > result = MahjongFanCalculator(pack, hand, i->first, 0, false, false, false, false, myPlayerID, quan);
-                int FanSum = 0;
-                for (auto j = result.begin(); j != result.end(); ++j)
-                    FanSum += j->first;
-                hand.pop_back();
-                hand.push_back(card);
-                if (FanSum >= 8)
-                    return true;
-            }
-            catch (const string & error) {
-                hand.pop_back();
-                hand.push_back(card);
-            }
-        }
-    }
-    return false;
-}
-
 // 胡部分
 bool CanHU(string winTile, bool isZIMO, bool isGANG) {
     MahjongInit();  // 初始化算番库
-    if (!isZIMO) hand.push_back(winTile);
+    if (isZIMO) {
+        auto i = find(hand.begin(), hand.end(), winTile);
+        hand.erase(i);
+    }
     bool isJUEZHANG = (known[winTile] == 3);
     bool isLast = false;
     for (int i = 0; i < 4; ++i) {
@@ -465,13 +442,33 @@ bool CanHU(string winTile, bool isZIMO, bool isGANG) {
         for (auto i = result.begin(); i != result.end(); ++i) {
             FanSum += i->first;
         }
-        if (!isZIMO) hand.pop_back();
+        if(isZIMO)
+            hand.push_back(winTile);
         return FanSum >= 8;
     }
     catch (const string & error) {
-        if (!isZIMO) hand.pop_back();
+        if(isZIMO)
+            hand.push_back(winTile);
         return false;
     }
+}
+
+// 听部分
+void CanTING() {
+    /**
+     * @brief
+     * 改变TING变量的状态
+    */
+    MahjongInit();  // 初始化算番库
+    int TING_num = 0; // 可以听的牌，多于特定数字才决定听牌，减小可以胡的牌全部在别人手里的可能
+    for (auto i = known.begin(); i != known.end(); ++i) {
+        if (i->second < 4) {
+            if (CanHU(i->first, false, false))
+                TING_num += 4 - i->second;
+        }
+    }
+    if (TING_num >= 2) 
+        TING = true;
 }
 
 // 吃部分
@@ -527,6 +524,8 @@ string PENG(string card, int supplierID) {
 
 // 补杠部分
 bool CanBUGANG(string card, int supplier = myPlayerID) {
+    if (TileLeft[myPlayerID] == 0) // 我以为这里不会有非法操作了，结果刚刚一句真就补杠了最后一张牌
+        return false;
     for (auto i = pack.begin(); i != pack.end(); ++i) {
         if (i->first == "PENG" && (*i).second.first == card) {
             return true;
@@ -541,6 +540,8 @@ string BUGANG(string card, int supplierID = myPlayerID) {
 
 // 杠部分
 bool CanGANG(string card, int supplierID) {
+    if (TileLeft[myPlayerID] == 0)
+        return false;
     if (TileLeft[NextID(supplierID)] == 0 && supplierID != myPlayerID) // 自己摸牌杠不受下家牌荒限制
         return false;
     int card_num = NewNum(card);
@@ -602,10 +603,9 @@ pair<string, string> AfterDraw(string card, bool isGANG) {
         return make_pair("HU", "");
 
     //如果听牌就摸到啥打出啥，不再改变牌面
-    if (IfTING(card)) {
-        auto i = find(hand.begin(), hand.end(), card);
-        hand.erase(i);
-        return make_pair("PLAY", card);
+    if (TING) {
+        hand.erase(find(hand.begin(), hand.end(), card));
+        return make_pair("PLAY ", card);
     }
 
     HandsetInit();
@@ -675,7 +675,7 @@ pair<string, pair<string, string> > ActOthers(string card, int supplierID) {
      * supplierID 供牌方ID
     */
 
-    //暂时先设定能胡就胡
+    // 暂时先设定能胡就胡
     if (CanHU(card, false, false))
         return make_pair("HU", make_pair("", ""));
 
@@ -754,7 +754,7 @@ pair<string, pair<string, string> > ActOthers(string card, int supplierID) {
             compares[CHIRightCompare] = IfAct(BCRM, ACRM, BCRA, ACRA, BCRR, ACRR);
     }
 
-    if (CanPENG(card, supplierID) && IfPENG()) {
+    if (CanPENG(card, supplierID) && IfPENG() && !TING) { // 听牌时不要把将给碰了
         int BPM = BeforeMin;
         int BPA = BeforeAverage;
         double BPR = BeforeRate;
@@ -865,8 +865,8 @@ void ProcessKnown()
         sin.str(request[i]);
         sin >> itmp;
         if (itmp == 2) { // 摸牌
-            sin >> CardName;
-            hand.push_back(CardName);
+            sin >> stmp;
+            hand.push_back(stmp);
             TileLeft[myPlayerID]--;
         }
         if (itmp == 3) {
@@ -946,6 +946,8 @@ void ProcessKnown()
             hand.erase(find(hand.begin(), hand.end(), CardName));
         }
     }
+    if (turnID >= 40)
+        CanTING();
 }
 
 void Input()
