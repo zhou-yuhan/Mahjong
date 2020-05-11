@@ -2,7 +2,7 @@
  * @Author: Xia Hanyu
  * @Date:   2020-05-05 10:55:15
  * @Last Modified by:   Xia Hanyu
- * @Last Modified time: 2020-05-11 11:07:21
+ * @Last Modified time: 2020-05-11 11:12:43
  */
  /**20200510 zhouyuhan Update
   ----------------------------------------
@@ -544,6 +544,8 @@ string PENG(string card, int supplierID) {
 
 // 补杠部分
 bool CanBUGANG(string card, int supplier = myPlayerID) {
+    if(TileLeft[myPlayerID] == 0) // 我以为这里不会有非法操作了，结果刚刚一句真就补杠了最后一张牌
+        return false;
     for (auto i = pack.begin(); i != pack.end(); ++i) {
         if (i->first == "PENG" && (*i).second.first == card) {
             return true;
@@ -558,6 +560,8 @@ string BUGANG(string card, int supplierID = myPlayerID) {
 
 // 杠部分
 bool CanGANG(string card, int supplierID) {
+    if(TileLeft[myPlayerID] == 0) 
+        return false;
     if (TileLeft[NextID(supplierID)] == 0 && supplierID != myPlayerID) // 自己摸牌杠不受下家牌荒限制
         return false;
     int card_num = NewNum(card);
