@@ -2,16 +2,15 @@
  * @Author: Xia Hanyu
  * @Date:   2020-05-11 16:22:34
  * @Last Modified by:   Xia Hanyu
- * @Last Modified time: 2020-05-11 17:21:58
+ * @Last Modified time: 2020-05-12 21:12:05
  */
 
 /**
- * update 2020-05-11 zhouyuhan
+ * update 2020-05-12 zhouyuhan
  * ************************************************
- * 对听牌做了一点调整
- * 对Marking()字牌做了微小的调整，不会再手里拿张单字牌不动了
+ * 修改了一点胡方面的问题，但是还是会有错胡现象，非常迷惑
  * 
- * 
+ * 加入了全求人部分，算是为后续凑番种写了个开头
  * ************************************************
 */
 #include <iostream>
@@ -51,8 +50,10 @@ int itmp;
 int idtmp;
 vector<string> request, response;
 vector<string> hand;
+vector<pair<string, pair<string, int> > > pack;
 multiset<int> handset;
 multiset<int> allhandset;
+unordered_map<string, int> known;
 ostringstream sout;
 istringstream sin;
 int myPlayerID, quan;
@@ -64,6 +65,22 @@ string its[34] = { "W1","W2","W3","W4","W5","W6","W7","W8","W9",
                    "F1","F2","F3","F4","J1","J2","J3" };
 
 map<string, int> sti;
+
+/**
+ * 以下是一些标志，判断牌是否需要向该番形发展
+ * 问题在于，不同的番形很可能与现有评估函数不兼容
+ * 更重要的是，并没有思路怎么去判断番形朝向哪个发展，以及如何控制发展
+ * 而且，会不会因为追求番形而打掉有用的牌最后捡芝麻丢西瓜
+ * 
+ * 好在“全求人”至少6番，要求单调将，所以判断pack很多时可以考虑不保留唯一的对子从而单调将
+*/
+
+// 全求人 
+bool MELDED_HAND = false; 
+void MeldedHand() {
+    if(pack.size() >= 3)
+        MELDED_HAND = true; 
+}
 
 int NewNum(string card) {
     /**
@@ -98,17 +115,6 @@ int MyMin(int a, int b) {
     return a < b ? a : b;
 }
 
-/**
- * @brief
- * 以下内容用于储存已经出现的牌的出现次数
- * 1. 打出的牌，无论是否被吃、碰，都已不会再变为未知
- * 2. 打出的牌若是被吃、碰、杠，则该顺/刻就永远已知
- * @param
- * known 储存已知牌的哈希表
- * @function
- * AddKnown 将新出现的明牌加入known
-*/
-unordered_map<string, int> known;
 void AddKnown(string card)
 {
     auto it = known.find(card);
@@ -120,16 +126,6 @@ void AddKnown(string card)
     }
 }
 
-/**
- * @brief
- * 以下内容存储自己鸣牌（吃、碰、杠得到的牌）
- * @param
- * pack 容器，为了与算番库匹配，定义为 vector<pair<string, pair<string, int> > > 详见算番库介绍
- * @function
- * AddPack 添加鸣牌,并自动加入known
- * CalPos 计算玩家ID相对于自己是上家、对家、下家
-*/
-vector<pair<string, pair<string, int> > > pack;
 void AddPack(string TYPE, string MidCard, int from = 0, bool is_BUGANG = false) // is_BUGANG 用于区分暗杠和补杠
 {
     pack.push_back(make_pair(TYPE, make_pair(MidCard, from)));
@@ -469,13 +465,7 @@ bool CanHU(string winTile, bool isZIMO, bool isGANG) {
         hand.erase(i);
     }
     bool isJUEZHANG = (known[winTile] == 3);
-    bool isLast = false;
-    for (int i = 0; i < 4; ++i) {
-        if (TileLeft[i] == 0) {
-            isLast = true;
-            break;
-        }
-    }
+    bool isLast = (TileLeft[NextID(myPlayerID)] == 0);
     try {
         vector<pair<int, string> > result = MahjongFanCalculator(
             pack, hand, winTile, 0, isZIMO, isJUEZHANG, isGANG, isLast, myPlayerID, quan
@@ -1036,6 +1026,25 @@ void Initialize()
      * 初始化工作
     */
 
+    // 初始化所有判断番形方向的函数，目前只有全求人
+    MeldedHand();
+    
+    // 初始化参数
+    params.same = 10;     //相同牌权重
+    params.adjacent = 8;  //相邻牌权重
+    params.interval = 6;  //隔牌权重
+    params.unknown = 2;   //未知牌权重
+    params.zipai = 2;     //字牌权重
+    params.samezp = 5;  //相同字牌的权重：因为字牌同数字牌相比不能吃，肯定会损失一部分权重，所以对存在相同牌的字牌权重要增加，相当于放大了有相同牌时的权重增加值
+    params.num19 = 3;       // 19数字牌权重
+    params.num28 = 2;       // 28数字牌权重
+    params.scolordnum = 2;  // same color && different number
+                         // 同色不同数字牌的基础权重（每多一张权重增加一倍）
+    params.snumdcolor = 2;  // same number && different color
+                         // 同数字不同颜色牌的基础权重（越多权重越高，呈正比例增长,如果相邻、相隔牌也存在同样情况那么权重增加且有系数）
+    params.onlycouple = MELDED_HAND ? 0 : 100;  //保留将牌
+    params.threshold = 0;
+
     // 初始化map sti
     for (int i = 0; i < 34; ++i)
         sti[its[i]] = i;
@@ -1099,7 +1108,7 @@ void Act()
                 }
                 if (stmp == "BUGANG") {//别人补杠(先默认能抢杠和就抢杠和)
                     sin >> card;
-                    if (CanHU(card, false, true))
+                    if (CanHU(card, false, false))
                         act = make_pair("HU", make_pair("", ""));
                     else
                         act = make_pair("PASS", make_pair("", ""));
