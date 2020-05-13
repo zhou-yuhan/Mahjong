@@ -478,7 +478,6 @@ int Marking(string card) {
     if (Little_Four_Winds())//小四喜
         mark += params.BigFan;
 
-
     if (n00 >= 3 && Two_Concealed_Pungs())//双暗刻
         mark += params.BigFan;
     if (n00 >= 3 && Three_Concealed_Pungs())//三暗刻
@@ -487,9 +486,16 @@ int Marking(string card) {
         mark += params.BigFan;
 
     if (x > 60) {
-        mark += params.zipai; // 字牌的权重
+        if (known[card] > 2)//要是牌池里已经出现多于两个该字牌了，就赶紧把这个字牌扔出去吧
+            return 0;
+        mark += params.zipai; // 非圈风字牌的权重
         mark += params.samezp * (handset.count(x) - 1); //经过对战，发现经常有后期保留单个字牌而打掉有用的牌，最后只能单调将字牌或者不能胡的局面，此处减一使得单个字牌赋分不再很高
-
+        if ((x - 65) / 5 == quan) {//圈风刻
+            mark += params.zipai;
+            mark += params.samezp * (handset.count(x) - 1);
+        }
+        if (Two_Dragon_Pungs())//双箭刻
+                mark += params.BigFan;
     }
 
     if (x % 10 == 1 || x % 10 == 9)
@@ -532,8 +538,7 @@ int Marking(string card) {
     }
 
     if (x > 60) {//如果是字牌
-        if (Two_Dragon_Pungs())//双箭刻
-            mark += params.BigFan;
+        
     }
 
     if (handset.count(x) == 2 && CoupleNum() == 1)//保留将牌
