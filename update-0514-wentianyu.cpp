@@ -1,21 +1,11 @@
 /*
-下面这些番种都是依靠一副牌面的部分牌型来判定的，比较好写函数，只要存在这样的牌型，那么只要这个牌型里的所有牌的mark都变得很大很大，就能实现留住它们的效果
-1.小三元
-2.小四喜
-3.一色三同顺
-4.一色三节高
-5.清龙
-6.一色三步高
-8.三暗刻
-9.花龙
-10.三色三同顺
-11.三色三步高
-12.双箭刻
+下一步目标：补全下列番种的函数：
+1.一色三节高
+2.一色三步高
+3.花龙
+4.三色三同顺
+5.三色三步高
 */
-
-
-
-
 
 #include <iostream>
 #include <string>
@@ -54,8 +44,10 @@ int itmp;
 int idtmp;
 vector<string> request, response;
 vector<string> hand;
+vector<pair<string, pair<string, int> > > pack;
 multiset<int> handset;
 multiset<int> allhandset;
+unordered_map<string, int> known;
 ostringstream sout;
 istringstream sin;
 int myPlayerID, quan;
@@ -67,6 +59,15 @@ string its[34] = { "W1","W2","W3","W4","W5","W6","W7","W8","W9",
                    "F1","F2","F3","F4","J1","J2","J3" };
 
 map<string, int> sti;
+
+/**
+ * 以下是一些标志，判断牌是否需要向该番形发展
+ * 问题在于，不同的番形很可能与现有评估函数不兼容
+ * 更重要的是，并没有思路怎么去判断番形朝向哪个发展，以及如何控制发展
+ * 而且，会不会因为追求番形而打掉有用的牌最后捡芝麻丢西瓜
+ *
+ * 好在“全求人”至少6番，要求单调将，所以判断pack很多时可以考虑不保留唯一的对子从而单调将
+*/
 
 int NewNum(string card) {
     /**
@@ -101,17 +102,6 @@ int MyMin(int a, int b) {
     return a < b ? a : b;
 }
 
-/**
- * @brief
- * 以下内容用于储存已经出现的牌的出现次数
- * 1. 打出的牌，无论是否被吃、碰，都已不会再变为未知
- * 2. 打出的牌若是被吃、碰、杠，则该顺/刻就永远已知
- * @param
- * known 储存已知牌的哈希表
- * @function
- * AddKnown 将新出现的明牌加入known
-*/
-unordered_map<string, int> known;
 void AddKnown(string card)
 {
     auto it = known.find(card);
@@ -123,16 +113,6 @@ void AddKnown(string card)
     }
 }
 
-/**
- * @brief
- * 以下内容存储自己鸣牌（吃、碰、杠得到的牌）
- * @param
- * pack 容器，为了与算番库匹配，定义为 vector<pair<string, pair<string, int> > > 详见算番库介绍
- * @function
- * AddPack 添加鸣牌,并自动加入known
- * CalPos 计算玩家ID相对于自己是上家、对家、下家
-*/
-vector<pair<string, pair<string, int> > > pack;
 void AddPack(string TYPE, string MidCard, int from = 0, bool is_BUGANG = false) // is_BUGANG 用于区分暗杠和补杠
 {
     pack.push_back(make_pair(TYPE, make_pair(MidCard, from)));
@@ -291,6 +271,7 @@ struct node {
     int snumdcolor = 2;  // same number && different color
                          // 同数字不同颜色牌的基础权重（越多权重越高，呈正比例增长,如果相邻、相隔牌也存在同样情况那么权重增加且有系数）
     int onlycouple = 100;  //保留将牌
+    int BigFan = 100;//特殊番种的牌型里的牌加特大权重
     int threshold = 0;
 };
 
@@ -317,6 +298,161 @@ int CoupleNum() {
     return cnt;
 }
 
+//返回暗刻和暗杠数
+int KeNum() {
+    HandsetInit();
+    int cnt = 0;
+    for (int i = 11; i < 20; ++i)
+        if (handset.count(i) >= 3)
+            ++cnt;
+    for (int i = 31; i < 40; ++i)
+        if (handset.count(i) >= 3)
+            ++cnt;
+    for (int i = 51; i < 60; ++i)
+        if (handset.count(i) >= 3)
+            ++cnt;
+    for (int i = 65; i < 100; i += 5)
+        if (handset.count(i) >= 3)
+            ++cnt;
+    return cnt;
+}
+
+// 全求人 
+bool MELDED_HAND = false;
+void MeldedHand() {
+    if (pack.size() >= 3)
+        MELDED_HAND = true;
+}
+
+//大三元
+bool Big_Three_Dragons() {
+    int All_Num = allhandset.size();
+    int Num = 0;
+    for (auto i = allhandset.begin(); i != allhandset.end(); ++i)
+        if (*i > 80)
+            ++Num;
+    int Others_Num = All_Num - Num;
+    return Others_Num <= 5;
+}
+
+//小三元
+bool Little_Three_Dragons() {
+    int All_Num = allhandset.size();
+    int Num = 0;
+    for (auto i = allhandset.begin(); i != allhandset.end(); ++i)
+        if (*i > 80)
+            ++Num;
+    int Others_Num = All_Num - Num;
+    return Others_Num <= 6;
+}
+
+//大四喜
+bool Big_Four_Winds() {
+    int All_Num = allhandset.size();
+    int Num = 0;
+    for (auto i = allhandset.begin(); i != allhandset.end(); ++i)
+        if (*i > 60 && *i <= 80)
+            ++Num;
+    int Others_Num = All_Num - Num;
+    return Others_Num <= 2;
+}
+
+//小四喜
+bool Little_Four_Winds() {
+    int All_Num = allhandset.size();
+    int Num = 0;
+    for (auto i = allhandset.begin(); i != allhandset.end(); ++i)
+        if (*i > 60 && *i <= 80)
+            ++Num;
+    int Others_Num = All_Num - Num;
+    return Others_Num <= 3;
+}
+
+//四暗刻
+bool Four_Concealed_Pungs() {
+    return KeNum() == 4;
+}
+
+//三暗刻
+bool Three_Concealed_Pungs() {
+    return KeNum() == 3;
+}
+
+//双暗刻
+bool Two_Concealed_Pungs() {
+    return KeNum() == 2;
+}
+
+//一色四同顺
+bool Quadruple_Chow(int x) {
+    int num20 = allhandset.count(x - 2);
+    int num10 = allhandset.count(x - 1);
+    int num00 = allhandset.count(x);
+    int num01 = allhandset.count(x + 1);
+    int num02 = allhandset.count(x + 2);
+    if (num20 == 4 && num10 == 4 && num00 == 4)
+        return true;
+    if (num10 == 4 && num00 == 4 && num01 == 4)
+        return true;
+    if (num00 == 4 && num01 == 4 && num02 == 4)
+        return true;
+    return false;
+}
+
+//一色三同顺
+bool Pure_Triple_Chow(int x) {
+    int num20 = allhandset.count(x - 2);
+    int num10 = allhandset.count(x - 1);
+    int num00 = allhandset.count(x);
+    int num01 = allhandset.count(x + 1);
+    int num02 = allhandset.count(x + 2);
+    if (num20 == 3 && num10 == 3 && num00 == 3)
+        return true;
+    if (num10 == 3 && num00 == 3 && num01 == 3)
+        return true;
+    if (num00 == 3 && num01 == 3 && num02 == 3)
+        return true;
+    return false;
+}
+
+//三同刻
+bool Triple_Pung(int x) {
+    int Num1to9 = x % 10;
+    int num1 = allhandset.count(10 + Num1to9);
+    int num2 = allhandset.count(30 + Num1to9);
+    int num3 = allhandset.count(50 + Num1to9);
+    return num1 >= 3 && num2 >= 3 && num3 >= 3;
+}
+
+//双同刻
+bool Mixed_Double_Pung(int x) {
+    int Num1to9 = x % 10;
+    int num1 = allhandset.count(10 + Num1to9);
+    int num2 = allhandset.count(30 + Num1to9);
+    int num3 = allhandset.count(50 + Num1to9);
+    int flag = (num1 >= 3) + (num2 >= 3) + (num3 >= 3);
+    return flag == 2;
+}
+
+//双箭刻
+bool Two_Dragon_Pungs() {
+    int num1 = allhandset.count(85);
+    int num2 = allhandset.count(90);
+    int num3 = allhandset.count(95);
+    int flag = (num1 >= 3) + (num2 >= 3) + (num3 >= 3);
+    return flag == 2;
+}
+
+//清龙
+bool Pure_Straight(int x) {
+    int Ten = (x / 10) * 10;
+    int num = 0;
+    for (int i = 1; i < 10; ++i)
+        if (allhandset.count(Ten + i) > 0)
+            ++num;
+    return num == 9;
+}
+
 //给hand里的每张牌评分
 int Marking(string card) {
     int x = NewNum(card);
@@ -333,9 +469,27 @@ int Marking(string card) {
     mark += (n20 > 0)* params.interval;
     mark += (n02 > 0)* params.interval;//隔牌的权重
 
+    if (Big_Three_Dragons())// 大三元
+        mark += params.BigFan;
+    if (Little_Three_Dragons())//小三元
+        mark += params.BigFan;
+    if (Big_Four_Winds())//大四喜
+        mark += params.BigFan;
+    if (Little_Four_Winds())//小四喜
+        mark += params.BigFan;
+
+
+    if (n00 >= 3 && Two_Concealed_Pungs())//双暗刻
+        mark += params.BigFan;
+    if (n00 >= 3 && Three_Concealed_Pungs())//三暗刻
+        mark += params.BigFan;
+    if (n00 >= 3 && Four_Concealed_Pungs())//四暗刻
+        mark += params.BigFan;
+
     if (x > 60) {
-        mark += params.zipai;//字牌的权重
-        mark += params.samezp * handset.count(x);//相同字牌的权重
+        mark += params.zipai; // 字牌的权重
+        mark += params.samezp * (handset.count(x) - 1); //经过对战，发现经常有后期保留单个字牌而打掉有用的牌，最后只能单调将字牌或者不能胡的局面，此处减一使得单个字牌赋分不再很高
+
     }
 
     if (x % 10 == 1 || x % 10 == 9)
@@ -365,6 +519,21 @@ int Marking(string card) {
                 if (handset.count(i + Num1to9 - 2) > 0 && handset.count(x - 2) > 0)//相邻左牌也存在同数字不同色时，权重增加，但是要比相邻时低一些
                     mark += MyMin(handset.count(i + Num1to9 - 2), handset.count(x - 2)) * params.snumdcolor;
             }
+        if (Triple_Pung(x))//三同刻
+            mark += params.BigFan;
+        if (Mixed_Double_Pung(x))//双同刻
+            mark += params.BigFan;
+        if (Pure_Straight(x))//清龙
+            mark += params.BigFan;
+        if(Quadruple_Chow(x))//一色四同顺
+            mark += params.BigFan;;
+        if (Pure_Triple_Chow(x))//一色三同顺
+            mark += params.BigFan;
+    }
+
+    if (x > 60) {//如果是字牌
+        if (Two_Dragon_Pungs())//双箭刻
+            mark += params.BigFan;
     }
 
     if (handset.count(x) == 2 && CoupleNum() == 1)//保留将牌
@@ -413,12 +582,14 @@ int Marking(string card) {
     if (n01 > 0 && n02 == 0)//(x)(x+1)的情况
         mark += (k02 * params.unknown + k10 * params.unknown);
     mark += k00 * params.unknown;
- 
+
     return mark;
 }
 
 //计算牌的第二低分（因为第一低分的牌操作后一定会被打出去）
 int MinMark() {
+    HandsetInit();
+    AllHandsetInit();
     int minmark = 100000;
     for (auto i = hand.begin(); i != hand.end(); ++i)
         if (Marking(*i) < minmark)
@@ -432,6 +603,8 @@ int MinMark() {
 
 //计算每张牌评分的平均值
 int MarkingAverage() {
+    HandsetInit();
+    AllHandsetInit();
     int Size = hand.size();
     int TotalMark = 0;
     for (auto i = hand.begin(); i != hand.end(); ++i)
@@ -441,6 +614,8 @@ int MarkingAverage() {
 
 //BadRate()返回坏牌占整副牌面的比例
 double BadRate() {
+    HandsetInit();
+    AllHandsetInit();
     int n = 0;
     for (auto i = hand.begin(); i != hand.end(); ++i)
         if (Marking(*i) < BadcardLine)
@@ -471,13 +646,7 @@ bool CanHU(string winTile, bool isZIMO, bool isGANG) {
         hand.erase(i);
     }
     bool isJUEZHANG = (known[winTile] == 3);
-    bool isLast = false;
-    for (int i = 0; i < 4; ++i) {
-        if (TileLeft[i] == 0) {
-            isLast = true;
-            break;
-        }
-    }
+    bool isLast = (TileLeft[NextID(myPlayerID)] == 0);
     try {
         vector<pair<int, string> > result = MahjongFanCalculator(
             pack, hand, winTile, 0, isZIMO, isJUEZHANG, isGANG, isLast, myPlayerID, quan
@@ -486,12 +655,12 @@ bool CanHU(string winTile, bool isZIMO, bool isGANG) {
         for (auto i = result.begin(); i != result.end(); ++i) {
             FanSum += i->first;
         }
-        if(isZIMO)
+        if (isZIMO)
             hand.push_back(winTile);
         return FanSum >= 8;
     }
     catch (const string & error) {
-        if(isZIMO)
+        if (isZIMO)
             hand.push_back(winTile);
         return false;
     }
@@ -502,16 +671,32 @@ void CanTING() {
     /**
      * @brief
      * 改变TING变量的状态
+     * 查找可以听的牌应该查找所有牌，对于known里没有的牌，最应该听但却没有包括
     */
     MahjongInit();  // 初始化算番库
     int TING_num = 0; // 可以听的牌，多于特定数字才决定听牌，减小可以胡的牌全部在别人手里的可能
-    for (auto i = known.begin(); i != known.end(); ++i) {
-        if (i->second < 4) {
-            if (CanHU(i->first, false, false))
-                TING_num += 4 - i->second;
+    for (int i = 0; i < 34; ++i) {
+        string card = its[i];
+        if (CanHU(card, false, false)) {
+            int hand_num = 0;
+            for (auto i = hand.begin(); i != hand.end(); ++i) {
+                if (*i == card)
+                    hand_num++;
+            }
+            if (known.find(card) != known.end()) {
+                TING_num += 4 - known[card] - hand_num; // 要减去手里有的牌，防止自己手持一堆要胡的牌还不知道
+            }
+            else {
+                TING_num += 4 - hand_num;
+            }
         }
     }
-    if (TING_num >= 2) 
+    int least;
+    if (turnID >= 100) // 100回合之后了，快没牌了，就算只有一张也要等
+        least = 1;
+    else
+        least = 2;
+    if (TING_num >= least)
         TING = true;
 }
 
@@ -601,6 +786,8 @@ string GANG(string card, int supplierID) {
 
 // 出牌部分
 string PLAY() {
+    HandsetInit();
+    AllHandsetInit();
     auto result = hand.begin();
     int minMark = numeric_limits<int>::max();
     for (auto i = hand.begin(); i != hand.end(); ++i) {
@@ -1023,6 +1210,25 @@ void Initialize()
      * 初始化工作
     */
 
+    //不求人
+    MeldedHand();
+
+    // 初始化参数
+    params.same = 10;     //相同牌权重
+    params.adjacent = 8;  //相邻牌权重
+    params.interval = 6;  //隔牌权重
+    params.unknown = 2;   //未知牌权重
+    params.zipai = 2;     //字牌权重
+    params.samezp = 5;  //相同字牌的权重：因为字牌同数字牌相比不能吃，肯定会损失一部分权重，所以对存在相同牌的字牌权重要增加，相当于放大了有相同牌时的权重增加值
+    params.num19 = 3;       // 19数字牌权重
+    params.num28 = 2;       // 28数字牌权重
+    params.scolordnum = 2;  // same color && different number
+                         // 同色不同数字牌的基础权重（每多一张权重增加一倍）
+    params.snumdcolor = 2;  // same number && different color
+                         // 同数字不同颜色牌的基础权重（越多权重越高，呈正比例增长,如果相邻、相隔牌也存在同样情况那么权重增加且有系数）
+    params.onlycouple = MELDED_HAND ? 0 : 100;  //保留将牌
+    params.threshold = 0;
+
     // 初始化map sti
     for (int i = 0; i < 34; ++i)
         sti[its[i]] = i;
@@ -1086,7 +1292,7 @@ void Act()
                 }
                 if (stmp == "BUGANG") {//别人补杠(先默认能抢杠和就抢杠和)
                     sin >> card;
-                    if (CanHU(card, false, true))
+                    if (CanHU(card, false, false))
                         act = make_pair("HU", make_pair("", ""));
                     else
                         act = make_pair("PASS", make_pair("", ""));
@@ -1113,6 +1319,5 @@ int main()
     Initialize();
     ProcessKnown();
     Act();
-    system("pause");
     return 0;
 }
