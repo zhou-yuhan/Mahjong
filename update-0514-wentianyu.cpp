@@ -17,7 +17,7 @@
 #include <limits>
 #include <cstring>
 #include <sstream>
-#include "./Chinese-Standard-Mahjong-master/fan-calculator-usage/Mahjong-GB-CPP/MahjongGB/MahjongGB.h"
+#include "MahjongGB/MahjongGB.h"
 
 using namespace std;
 
