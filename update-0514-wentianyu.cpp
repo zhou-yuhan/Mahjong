@@ -469,13 +469,13 @@ int Marking(string card) {
     mark += (n20 > 0)* params.interval;
     mark += (n02 > 0)* params.interval;//隔牌的权重
 
-    if (Big_Three_Dragons())// 大三元
+    if (x>80 && Big_Three_Dragons())// 大三元
         mark += params.BigFan;
-    if (Little_Three_Dragons())//小三元
+    if (x>80 && Little_Three_Dragons())//小三元
         mark += params.BigFan;
-    if (Big_Four_Winds())//大四喜
+    if (x>60 && x<=80 && Big_Four_Winds())//大四喜
         mark += params.BigFan;
-    if (Little_Four_Winds())//小四喜
+    if (x>60 && x<=80 && Little_Four_Winds())//小四喜
         mark += params.BigFan;
 
     if (n00 >= 3 && Two_Concealed_Pungs())//双暗刻
