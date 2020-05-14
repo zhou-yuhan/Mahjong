@@ -9,7 +9,6 @@
 
 #include <iostream>
 #include <string>
-#include <sstream>
 #include <vector>
 #include <algorithm>
 #include <map>
@@ -17,7 +16,8 @@
 #include <unordered_map>
 #include <limits>
 #include <cstring>
-#include "MahjongGB/MahjongGB.h"
+#include <sstream>
+#include "./Chinese-Standard-Mahjong-master/fan-calculator-usage/Mahjong-GB-CPP/MahjongGB/MahjongGB.h"
 
 using namespace std;
 
@@ -49,7 +49,7 @@ multiset<int> handset;
 multiset<int> allhandset;
 unordered_map<string, int> known;
 ostringstream sout;
-istringstream sin;
+istringstream sinn;
 int myPlayerID, quan;
 int TileLeft[4];
 bool TING = false;
@@ -1095,44 +1095,44 @@ void ProcessKnown()
      * 3. 顺便处理摸牌
     */
     for (int i = 0; i <= turnID; ++i) {
-        sin.clear();
+        sinn.clear();
         string CardName;
         // 1. 所有request出现的明牌
-        sin.str(request[i]);
-        sin >> itmp;
+        sinn.str(request[i]);
+        sinn >> itmp;
         if (itmp == 2) { // 摸牌
-            sin >> stmp;
+            sinn >> stmp;
             hand.push_back(stmp);
             TileLeft[myPlayerID]--;
         }
         if (itmp == 3) {
-            sin >> idtmp >> stmp;
+            sinn >> idtmp >> stmp;
             if (idtmp != myPlayerID) { // 自身request除不处理
                 if (stmp == "DRAW")
                     TileLeft[idtmp]--;
                 if (stmp == "PLAY") {
-                    sin >> CardName;
+                    sinn >> CardName;
                     AddKnown(CardName);
                 }
                 else if (stmp == "PENG") {
-                    sin >> CardName;
+                    sinn >> CardName;
                     AddKnown(CardName);
                     AddKnown(Out(i - 1).first);
                     AddKnown(Out(i - 1).first);
                 }
                 else if (stmp == "CHI") {
-                    sin >> CardName;
+                    sinn >> CardName;
                     // 避免把上回合打出的牌重复加入Known
                     string CHIcard = Out(i - 1).first;
                     for (int i = -1; i <= 1; ++i) {
                         if (sti[CardName] + i != sti[CHIcard])
                             AddKnown(its[sti[CardName] + i]);
                     }
-                    sin >> CardName;
+                    sinn >> CardName;
                     AddKnown(CardName);
                 }
                 else if (stmp == "BUGANG") {
-                    sin >> CardName;
+                    sinn >> CardName;
                     AddKnown(CardName);
                 }
                 else if (stmp == "GANG") {
@@ -1146,23 +1146,28 @@ void ProcessKnown()
         // 处理response
         if (i == turnID)
             break;
-        sin.clear();
-        sin.str(response[i]);
-        sin >> stmp;
+        sinn.clear();
+        sinn.str(response[i]);
+        sinn >> stmp;
+        istringstream sssin;
+        sssin.str(request[i + 1]);
+        int iddtmp;
+        string sstmp;
+        sssin >> iddtmp >> iddtmp >> sstmp;
         if (stmp == "PLAY") {
-            sin >> CardName;
+            sinn >> CardName;
             hand.erase(find(hand.begin(), hand.end(), CardName));
         }
-        else if (stmp == "PENG") {
-            sin >> CardName; // 这是碰后打出的牌
+        else if (stmp == "PENG" && iddtmp == myPlayerID && sstmp == "PENG") {
+            sinn >> CardName; // 这是碰后打出的牌
             hand.erase(find(hand.begin(), hand.end(), CardName));
             AddKnown(CardName);
             AddPack("PENG", Out(i).first, CalPos(Out(i).second));
         }
-        else if (stmp == "GANG") {
+        else if (stmp == "GANG" && iddtmp == myPlayerID && sstmp == "GANG") {
             // 1. 暗杠
             if (Out(i).first == "NONE") {
-                sin >> CardName;
+                sinn >> CardName;
                 AddPack("GANG", CardName, 0); // 算番库说明没有写暗杠第三个参数应该是什么，先写0吧
             }
             else {
@@ -1170,14 +1175,14 @@ void ProcessKnown()
                 AddPack("GANG", Out(i).first, CalPos(Out(i).second));
             }
         }
-        else if (stmp == "BUGANG") {
-            sin >> CardName; // 补杠的牌
+        else if (stmp == "BUGANG" && iddtmp == myPlayerID && sstmp == "BUGANG") {
+            sinn >> CardName; // 补杠的牌
             AddPack("GANG", CardName, 0, true);
         }
-        else if (stmp == "CHI") {
-            sin >> CardName; // 得到的顺子的中间
+        else if (stmp == "CHI" && iddtmp == myPlayerID && sstmp == "CHI") {
+            sinn >> CardName; // 得到的顺子的中间
             AddPack("CHI", CardName, CalSupply(CardName, Out(i).first));
-            sin >> CardName; // 打出牌
+            sinn >> CardName; // 打出牌
             AddKnown(CardName);
             hand.erase(find(hand.begin(), hand.end(), CardName));
         }
@@ -1243,19 +1248,19 @@ void Initialize()
     }
     // 初始化手牌
     if (turnID < 2) {
-        sin.clear();
+        sinn.clear();
         return; // 在之后的回合再处理
     }
     else {
         // 存入初始信息
-        sin.str(request[0]); // 第一回合
-        sin >> itmp >> myPlayerID >> quan;
-        sin.clear();
-        sin.str(request[1]); // 第二回合
-        sin >> itmp; // 编号
-        sin >> itmp >> itmp >> itmp >> itmp; // 花牌数全为0
+        sinn.str(request[0]); // 第一回合
+        sinn >> itmp >> myPlayerID >> quan;
+        sinn.clear();
+        sinn.str(request[1]); // 第二回合
+        sinn >> itmp; // 编号
+        sinn >> itmp >> itmp >> itmp >> itmp; // 花牌数全为0
         for (int j = 0; j < 13; j++) { // 手牌
-            sin >> stmp;
+            sinn >> stmp;
             hand.push_back(stmp);
         }
     }
@@ -1268,23 +1273,23 @@ void Act()
      * 做出决策
      * 决策取决于本回合输入是什么(编号为2/3)
     */
-    sin.clear();
+    sinn.clear();
     if (turnID < 2) {
         sout << "PASS";
     }
     else {
-        sin.str(request[turnID]); // 本回合输入信息
-        sin >> itmp;
+        sinn.str(request[turnID]); // 本回合输入信息
+        sinn >> itmp;
         // 1. 摸牌 -> PLAY GANG BUGANG HU
         if (itmp == 2) {
-            sin >> stmp;
+            sinn >> stmp;
             auto act = AfterDraw(stmp, response[turnID - 1][0] == 'G' || response[turnID - 1][0] == 'B'); // 上回合是否杠牌
             sout << act.first << act.second;
         }
         // 2. itmp == 3 他人操作
         else {
-            sin >> idtmp;
-            sin >> stmp;
+            sinn >> idtmp;
+            sinn >> stmp;
             if (idtmp == myPlayerID || stmp == "BUHUA" || stmp == "DRAW" || stmp == "GANG") {// 补花、摸牌、杠或request来自自己 -> PASS
                 sout << "PASS";
             }
@@ -1292,22 +1297,22 @@ void Act()
                 string card; // 除了BUGANG外都会打出一张牌, BUGANG时card是补杠的牌
                 pair<string, pair<string, string> > act;// 做出的反应统一用act储存 command, card1, card2
                 if (stmp == "PLAY") {//别人打牌
-                    sin >> card;
+                    sinn >> card;
                     act = ActOthers(card, idtmp);
                 }
                 if (stmp == "BUGANG") {//别人补杠(先默认能抢杠和就抢杠和)
-                    sin >> card;
+                    sinn >> card;
                     if (CanHU(card, false, false))
                         act = make_pair("HU", make_pair("", ""));
                     else
                         act = make_pair("PASS", make_pair("", ""));
                 }
                 if (stmp == "PENG") { //别人碰牌
-                    sin >> card;
+                    sinn >> card;
                     act = ActOthers(card, idtmp);
                 }
                 if (stmp == "CHI") { // 别人吃牌
-                    sin >> card >> card;
+                    sinn >> card >> card;
                     act = ActOthers(card, idtmp);
                 }
                 sout << act.first << act.second.first << act.second.second;
@@ -1324,5 +1329,6 @@ int main()
     Initialize();
     ProcessKnown();
     Act();
+    system("pause");
     return 0;
 }
