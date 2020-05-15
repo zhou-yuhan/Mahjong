@@ -883,7 +883,9 @@ bool CanHU(string winTile, bool isZIMO, bool isGANG) {
         hand.erase(i);
     }
     int x = NewNum(winTile);
-    bool isJUEZHANG = (known[winTile] == 3);
+    bool isJUEZHANG = false;
+    if (known[winTile] == 4 || (known[winTile] == 3 && isZIMO))
+        isJUEZHANG = true;
     for (auto i = pack.begin(); i != pack.end(); ++i) {
         if (i->first == "CHI") {
             int k = NewNum((i->second).first);
