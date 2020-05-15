@@ -882,7 +882,20 @@ bool CanHU(string winTile, bool isZIMO, bool isGANG) {
         auto i = find(hand.begin(), hand.end(), winTile);
         hand.erase(i);
     }
+    int x = NewNum(winTile);
     bool isJUEZHANG = (known[winTile] == 3);
+    for (auto i = pack.begin(); i != pack.end(); ++i) {
+        if (i->first == "CHI") {
+            int k = NewNum((i->second).first);
+            if (x == k - 1 || x == k || x == k + 1)
+                isJUEZHANG = false;
+        }
+        if (i->first == "PENG" || i->first=="GANG") {
+            int m = NewNum((i->second).first);
+            if (x == m)
+                isJUEZHANG = false;
+        }
+    }
     bool isLast = (TileLeft[NextID(myPlayerID)] == 0);
     try {
         vector<pair<int, string> > result = MahjongFanCalculator(
